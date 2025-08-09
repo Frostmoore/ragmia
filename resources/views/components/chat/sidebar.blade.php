@@ -5,18 +5,39 @@
             <div class="text-lg font-semibold text-gray-900 dark:text-gray-100">Progetti</div>
 
             {{-- Impostazioni SOLO mobile --}}
-            <div class="lg:hidden mt-3 space-y-3">
+            <div class="mt-3 space-y-3">
                 <label class="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
                     <span>Auto-contesto</span>
-                    <input type="checkbox" x-model="$store.chat.autoContext"
-                        class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800">
+                    <input type="checkbox"
+                           x-model="$store.chat.autoContext"
+                           x-on:change="$store.chat.persistTabs()"
+                           class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800">
                 </label>
 
                 <div>
                     <div class="text-xs mb-1 text-gray-500 dark:text-gray-400">Modello</div>
-                    <x-select x-model="$store.chat.model"
-                            class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
-                        <option value="gpt-5">GPT-5</option>
+                    <x-select
+                        x-model="$store.chat.model"
+                        x-on:change="$store.chat.persistTabs()"
+                        class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
+                        <option value="openai:gpt-5">OpenAI — GPT-5</option>
+                        <option value="anthropic:claude-3-5-haiku">Anthropic — Claude 3.5 Haiku</option>
+                        <option value="google:gemini-1.5-flash">Google — Gemini 1.5 Flash</option>
+                        <option value="openai:gpt-4o-mini">OpenAI — GPT-4o mini</option>
+                        <option value="openai:o3">OpenAI — GPT-o3</option>
+                        <option value="openai:o3-pro">OpenAI — o3-pro</option>
+                    </x-select>
+                </div>
+
+                <div>
+                    <div class="text-xs mb-1 text-gray-500 dark:text-gray-400">Compressore</div>
+                    <x-select
+                        x-model="$store.chat.compress_model"
+                        x-on:change="$store.chat.persistTabs()"
+                        class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
+                        <option value="openai:gpt-4o-mini">OpenAI — GPT-4o mini</option>
+                        <option value="anthropic:claude-3-5-haiku">Anthropic — Claude 3.5 Haiku</option>
+                        <option value="google:gemini-1.5-flash">Google — Gemini 1.5 Flash</option>
                     </x-select>
                 </div>
 
@@ -26,14 +47,13 @@
             {{-- Search --}}
             <div class="mt-3 flex items-center gap-2">
                 <input x-model="$store.chat.search"
-                    type="text" placeholder="Cerca..."
-                    class="flex-1 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100
-                            focus:ring-0 focus:border-gray-400 dark:focus:border-gray-500 text-sm">
+                       type="text" placeholder="Cerca..."
+                       class="flex-1 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100
+                              focus:ring-0 focus:border-gray-400 dark:focus:border-gray-500 text-sm">
             </div>
 
-            {{-- Toolbar: su mobile griglia 2 colonne, su desktop inline --}}
+            {{-- Toolbar --}}
             <div class="mt-3">
-                {{-- Mobile / tablet: griglia, niente overflow --}}
                 <div class="grid grid-cols-2 gap-2 lg:hidden">
                     <x-secondary-button type="button"
                         x-on:click="$store.chat.promptNewFolder()"
@@ -48,7 +68,6 @@
                     </x-primary-button>
                 </div>
 
-                {{-- Desktop: affiancati con gap, no wrap inutile --}}
                 <div class="hidden lg:flex items-center gap-2">
                     <x-secondary-button type="button"
                         x-on:click="$store.chat.promptNewFolder()"
@@ -63,12 +82,9 @@
                     </x-primary-button>
                 </div>
             </div>
-
         </div>
 
-
         <div class="flex-1 min-h-0 overflow-y-auto p-2 space-y-3">
-            {{-- Senza cartella --}}
             <template x-if="$store.chat.projectsNoFolder.length">
                 <div>
                     <div class="px-3 py-2 text-xs uppercase text-gray-400 dark:text-gray-500">Senza cartella</div>
@@ -82,7 +98,6 @@
                 </div>
             </template>
 
-            {{-- Albero cartelle/progetti --}}
             <x-chat.project-tree :nodes="$folders ?? []" />
         </div>
     </div>

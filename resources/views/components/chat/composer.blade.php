@@ -10,14 +10,16 @@
                        bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700
                        placeholder-gray-400 dark:placeholder-gray-500"
             ></textarea>
-            <div class="flex items-center justify-between">
-                <div class="text-xs text-gray-500 dark:text-gray-400">
-                    Tab attiva: <span class="font-semibold" x-text="$store.chat.activeTab()?.path || '—'"></span>
+            <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                <div>
+                    Token usati: <span class="font-semibold" x-text="$store.chat.monthTokens || 0"></span> |
+                    Spesa: $<span class="font-semibold" x-text="($store.chat.monthCost || 0).toFixed(2)"></span>
                 </div>
                 <x-primary-button type="submit">
                     Invia
                 </x-primary-button>
             </div>
+
         </form>
     </div>
 </footer>

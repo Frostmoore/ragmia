@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use App\Services\LLM\LlmClient;
 
 class ChatController extends Controller
 {
@@ -62,61 +63,114 @@ class ChatController extends Controller
 
     public function send(Request $request)
     {
-        $path    = trim($request->input('project_path') ?? '');
-        $prompt  = $request->input('prompt');
-        $auto    = $request->boolean('auto');
+        $path   = trim($request->input('project_path') ?? '');
+        $prompt = (string) $request->input('prompt', '');
+        $auto   = $request->boolean('auto', true);
 
         if ($path === '') { $path = 'Default'; }
 
         $project = $this->resolveOrCreateProjectByPath($path);
 
-        // salvataggio messaggio user
-        Message::create([
+        $model = (string) $request->input('model', env('OPENAI_MODEL', 'openai:gpt-5'));
+        $compressModel = (string) $request->input('compress_model', 'openai:gpt-4o-mini');
+
+        $project = $this->resolveOrCreateProjectByPath($path);
+
+        // Salvo subito il messaggio utente
+        $userMsg = Message::create([
             'project_id' => $project->id,
             'role'       => 'user',
             'content'    => $prompt,
         ]);
 
-        // recupero memoria RAG (ultimi 10 blocchi)
-        $memories = Memory::where('project_id', $project->id)
-            ->latest()->take(10)->pluck('content')->implode("\n");
+        // Ultime coppie di messaggi
+        $history = $this->buildCompressedContext($project->id, pairs: 6);
 
-        $finalPrompt = "CONTESTO PROGETTO («{$project->path}»):\n{$memories}\n\nUTENTE:\n{$prompt}";
+        // Memorie brevi
+        $memories = '';
+        if ($auto) {
+            $memories = \App\Models\Memory::where('project_id', $project->id)
+                ->latest()->take(3)
+                ->pluck('content')
+                ->map(fn($c) => $this->clamp($c, 400))
+                ->implode("\n---\n");
+        }
+
+        // === COMPRESSORE ===
+        $compressKey   = env(strtoupper(strtok($compressModel, ':')) . '_API_KEY');
+
+        $compressionPrompt = <<<EOT
+    Il seguente blocco è il CONTEXT di una chat tecnica.
+    Devi riassumerlo in massimo 500 caratteri, mantenendo SOLO le informazioni rilevanti per capire la domanda.
+    NON aggiungere consigli, NON inventare testo, NON cambiare la domanda.
+
+    === CONTEXT START ===
+    {$history}
+    === CONTEXT END ===
+
+    Domanda attuale (NON modificare):
+    {$prompt}
+
+    Rispondi con:
+    [Contesto compresso]
+    DOMANDA: [domanda invariata]
+    EOT;
+
+        $compressedPrompt = $compressionPrompt;
+
+        // === COMPRESSORE ===
+        try {
+            $comp = $this->callProvider($compressModel, [
+                ['role' => 'system', 'content' => 'Sei un compressore di contesto. Non aggiungere testo tuo.'],
+                ['role' => 'user',   'content' => $compressionPrompt],
+            ], [
+                'max_tokens'  => 800,
+                'temperature' => 0,
+            ]);
+
+            $compressedPrompt = trim($comp['text'] ?? $compressionPrompt);
+            $compressUsage = [
+                'model'  => $compressModel,
+                'tokens' => (int)($comp['usage']['total'] ?? 0),
+            ];
+        } catch (\Throwable $e) {
+            return $this->respond($request, ['error' => 'Errore compressore: '.$e->getMessage()], 500);
+        }
+
+
+        // === GPT-5 (o altro) ===
+        $model = (string) $request->input('model', env('OPENAI_MODEL', 'openai:gpt-5'));
+        $maxCompletion = (int)($request->input('max_tokens') ?? 2000);
 
         try {
-            $res = Http::withToken(env('OPENAI_API_KEY'))
-                ->timeout(90)
-                ->acceptJson()
-                ->asJson()
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model'    => env('OPENAI_MODEL', 'gpt-5'),
-                    'messages' => [
-                        ['role' => 'system', 'content' => 'Sei un assistente tecnico. Rispondi conciso, in italiano, con codice quando serve.'],
-                        ['role' => 'user',   'content' => $finalPrompt],
-                    ],
-                    'max_completion_tokens' => (int)($request->input('max_tokens') ?? 2000),
-                    'temperature' => 1,
-                ]);
+            $final = $this->callProvider($model, [
+                ['role' => 'system', 'content' => 'Sei un assistente tecnico. Rispondi conciso, in italiano, con codice quando serve.'],
+                ['role' => 'user',   'content' => $compressedPrompt],
+            ], [
+                'max_tokens'  => $maxCompletion,
+                'temperature' => 1,
+            ]);
 
-            if (!$res->successful()) {
-                $err = $res->json()['error']['message'] ?? ('HTTP '.$res->status());
-                return $this->respond($request, ['error' => $err], 422);
-            }
-
-            $data   = $res->json();
-            $answer = data_get($data, 'choices.0.message.content')
-                   ?? data_get($data, 'choices.0.text')
-                   ?? 'Nessun contenuto nella risposta API.';
-
+            $answer   = $final['text'] ?? 'Nessun contenuto nella risposta API.';
+            $inTokens  = (int)($final['usage']['input']  ?? 0);
+            $outTokens = (int)($final['usage']['output'] ?? 0);
+            $totTokens = (int)($final['usage']['total']  ?? ($inTokens + $outTokens));
+            $costUsd   = $this->computeCostUsd($model, $inTokens, $outTokens);
         } catch (\Throwable $e) {
             return $this->respond($request, ['error' => 'Eccezione: '.$e->getMessage()], 500);
         }
 
-        // salva risposta e aggiorna memoria
-        Message::create([
-            'project_id' => $project->id,
-            'role'       => 'assistant',
-            'content'    => $answer,
+
+        // Salva risposta
+        $assistantMsg = Message::create([
+            'project_id'    => $project->id,
+            'role'          => 'assistant',
+            'content'       => $answer,
+            'tokens_input'  => $inTokens,
+            'tokens_output' => $outTokens,
+            'tokens_total'  => $totTokens,
+            'cost_usd'      => $costUsd,
+            'model'         => $model,
         ]);
 
         Memory::create([
@@ -124,8 +178,28 @@ class ChatController extends Controller
             'content'    => $prompt . "\n" . $answer,
         ]);
 
-        return $this->respond($request, ['answer' => $answer, 'project' => $project->only('id','path')], 200);
+        return $this->respond($request, [
+            'answer'  => $answer,
+            'project' => $project->only('id', 'path'),
+            'usage'   => [
+                'input'  => $inTokens,
+                'output' => $outTokens,
+                'total'  => $totTokens,
+                'cost'   => $costUsd,
+                'model'  => $model,
+                'compress' => $compressUsage ?? null,
+                'compressed_prompt_chars' => strlen($compressedPrompt),
+            ],
+        ], 200);
     }
+
+
+
+
+
+
+
+
 
     private function respond(Request $r, array $payload, int $status=200)
     {
@@ -211,5 +285,173 @@ class ChatController extends Controller
         $tree = $this->buildTree();
         return response()->json(['folder' => $folder, 'tree' => $tree], 201);
     }
+
+    public function stats()
+    {
+        $start = now()->startOfMonth();
+        $end   = now()->endOfMonth();
+
+        $q = \DB::table('messages')
+            ->whereBetween('created_at', [$start, $end])
+            ->where('role', 'assistant');
+
+        // opzionale: per utente
+        if (auth()->check()) {
+            // se hai relazione user->project o direttamente user_id in messages, filtra qui
+            // $q->where('user_id', auth()->id());
+        }
+
+        $tokens = (int) $q->sum('tokens_total');
+        $cost   = (float) $q->sum('cost_usd');
+
+        return response()->json([
+            'tokens' => $tokens,
+            'cost'   => round($cost, 4),
+        ]);
+    }
+
+
+    private function fetchRecentConversation(int $projectId, int $pairs = 8): string {
+        $msgs = \App\Models\Message::where('project_id', $projectId)
+            ->whereIn('role', ['user','assistant'])
+            ->orderByDesc('id')->limit($pairs * 2)->get()->reverse();
+
+        $lines = [];
+        foreach ($msgs as $m) {
+            $role = $m->role === 'user' ? 'Utente' : 'Assistente';
+            // NON rimuoviamo i blocchi di codice qui: decide il compressore
+            $lines[] = $role.': '.$m->content;
+        }
+        return implode("\n", $lines);
+    }
+
+    /** calcola costo in USD dato il modello e i token */
+    private function computeCostUsd(string $model, int $inputTokens, int $outputTokens): float
+    {
+        $pricing = config("ai.pricing.$model");
+        if (!$pricing) return 0.0;
+
+        $in  = (float) ($pricing['input_per_million']  ?? 0);
+        $out = (float) ($pricing['output_per_million'] ?? 0);
+
+        return round((($inputTokens * $in) + ($outputTokens * $out)) / 1_000_000, 6);
+    }
+
+
+    private function clamp(string $s, int $max): string {
+        // rimuovi i blocchi di codice (fanno salire i token a cavolo)
+        $s = preg_replace('/```[\s\S]*?```/m', '[codice omesso]', $s);
+        // compatta spazi e righe
+        $s = preg_replace('/\s+/', ' ', trim($s));
+        return mb_strlen($s) > $max ? mb_substr($s, 0, $max - 1).'…' : $s;
+    }
+
+    private function buildCompressedContext(int $projectId, int $pairs = 3, int $perMsgMax = 220, int $totalBudget = 1400): string {
+        // ultime N coppie (2N messaggi), in ordine cronologico
+        $msgs = \App\Models\Message::where('project_id', $projectId)
+            ->whereIn('role', ['user','assistant'])
+            ->orderByDesc('id')
+            ->limit($pairs * 2)
+            ->get()
+            ->reverse();
+
+        $out = [];
+        $used = 0;
+        foreach ($msgs as $m) {
+            $role = $m->role === 'user' ? 'Utente' : 'Assistente';
+            $line = $role.': '.$this->clamp($m->content ?? '', $perMsgMax);
+            $len  = mb_strlen($line) + 1;
+            if ($used + $len > $totalBudget) break;
+            $out[] = $line;
+            $used += $len;
+        }
+        return implode("\n", $out);
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * Restituisce l'URL dell'endpoint API in base al provider.
+     */
+    private function getApiUrl(string $model): string
+    {
+        $provider = strtolower(strtok($model, ':'));
+
+        return match ($provider) {
+            'openai'   => 'https://api.openai.com/v1/chat/completions',
+            'anthropic'=> 'https://api.anthropic.com/v1/messages',
+            'google'   => 'https://generativelanguage.googleapis.com/v1beta/models/' .
+                        $this->mapModelName($model) . ':generateContent?key=' . env('GOOGLE_API_KEY'),
+            default    => throw new \Exception("Provider API non supportato: {$provider}"),
+        };
+    }
+
+    /**
+     * Mappa il nome del modello in base al provider.
+     */
+    private function mapModelName(string $model): string
+    {
+        $provider = strtolower(strtok($model, ':'));
+        $name     = trim(strstr($model, ':'), ':') ?: $model;
+
+        return match ($provider) {
+            // OpenAI
+            'openai'    => $name, // es. gpt-5, gpt-4o-mini
+            // Anthropic
+            'anthropic' => match ($name) {
+                'claude-3-opus'   => 'claude-3-opus-20240229',
+                'claude-3-sonnet'=> 'claude-3-sonnet-20240229',
+                'claude-3-haiku' => 'claude-3-haiku-20240307',
+                default           => $name
+            },
+            // Google
+            'google'    => match ($name) {
+                'gemini-1.5-pro'  => 'gemini-1.5-pro',
+                'gemini-1.5-flash'=> 'gemini-1.5-flash',
+                default           => $name
+            },
+            default     => throw new \Exception("Provider non supportato: {$provider}"),
+        };
+    }
+
+
+
+
+
+
+    private function callProvider(string $modelId, array $messages, array $opts = []): array
+    {
+        $provider = strtolower(strtok($modelId, ':'));
+        $opts['model'] = $modelId;
+
+        switch ($provider) {
+            case 'openai':
+                $p = new \App\Services\LLM\Providers\OpenAIProvider();
+                break;
+            case 'anthropic':
+                $p = new \App\Services\LLM\Providers\AnthropicProvider();
+                break;
+            case 'google':
+                $p = new \App\Services\LLM\Providers\GoogleProvider();
+                break;
+            default:
+                throw new \RuntimeException("Provider non supportato: {$provider}");
+        }
+
+        return $p->chat($messages, $opts);
+    }
+
+
+
+
+
+
+
 
 }

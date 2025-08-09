@@ -36,5 +36,8 @@
     "bugs": {
         "url": "https://github.com/Frostmoore/Ragmia/issues"
     },
-    "homepage": "https://github.com/Frostmoore/Ragmia#readme"
+    "homepage": "https://github.com/Frostmoore/Ragmia#readme",
+    "dependencies": {
+        "highlight.js": "^11.11.1"
+    }
 }

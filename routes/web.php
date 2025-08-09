@@ -35,6 +35,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/send', [ChatController::class, 'send'])->name('chat.send');
 });
 
+Route::get('/chat/stats', [\App\Http\Controllers\ChatController::class, 'stats'])
+    ->middleware(['auth']) // se vuoi proteggerla
+    ->name('chat.stats');
+
+
+
 // Profili Breeze
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
