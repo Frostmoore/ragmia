@@ -1,11 +1,25 @@
-@import 'tailwindcss';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
-@source '../**/*.blade.php';
-@source '../**/*.js';
+/* Nasconde le scrollbar SOLO su mobile */
+@media (max-width: 1023px) {
+    .scrollbar-hide {
+        -ms-overflow-style: none; /* IE e Edge */
+        scrollbar-width: none; /* Firefox */
+    }
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none; /* Chrome, Safari, Opera */
+    }
+}
 
-@theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+/* Ripristino stile su desktop */
+@media (min-width: 1024px) {
+    .scrollbar-default {
+        -ms-overflow-style: auto;
+        scrollbar-width: auto;
+    }
+    .scrollbar-default::-webkit-scrollbar {
+        display: block;
+    }
 }
