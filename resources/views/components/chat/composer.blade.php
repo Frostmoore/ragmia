@@ -5,11 +5,27 @@
                 x-model="$store.chat.composer.text"
                 rows="4"
                 placeholder="Scrivi qui (Invio = invia, Shift+Invio = nuova riga)"
-                @keydown.enter.prevent="if(!$event.shiftKey){ $store.chat.sendMessage(); }"
+                @keydown.enter.prevent="
+                    if ($event.shiftKey) {
+                        const start = $el.selectionStart;
+                        const end   = $el.selectionEnd;
+                        const text  = $store.chat.composer.text;
+                        const newText = text.substring(0, start) + '\n' + text.substring(end);
+                        $store.chat.composer.text = newText;
+                        // Riposiziona il cursore
+                        $nextTick(() => {
+                            $el.selectionStart = $el.selectionEnd = start + 1;
+                        });
+                    } else {
+                        $store.chat.sendMessage();
+                    }
+                "
                 class="w-full rounded-lg border-gray-300 focus:ring-0 focus:border-gray-400 text-sm
-                       bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700
-                       placeholder-gray-400 dark:placeholder-gray-500"
+                    bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700
+                    placeholder-gray-400 dark:placeholder-gray-500"
             ></textarea>
+
+            {{-- Modelli --}}
             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                 <div>
                     Token usati: <span class="font-semibold" x-text="$store.chat.monthTokens || 0"></span> |

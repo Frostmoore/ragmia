@@ -2,7 +2,10 @@
 import '../css/app.css';
 import Alpine from 'alpinejs';
 import collapse from '@alpinejs/collapse';
-import registerChatStore from './chat-app';
+
+// ⬇️ nuovo entrypoint dello store modulare
+import registerChatStore from './chat/index';
+
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark-dimmed.css';
 
@@ -13,8 +16,10 @@ Alpine.plugin(collapse);
 document.addEventListener('alpine:init', () => {
   console.log('[alpine] init, version:', Alpine.version);
 
+  // registra lo store "chat" (modulare)
   registerChatStore(Alpine);
 
+  // store UI minimale (come prima)
   if (!Alpine.store('ui')) {
     Alpine.store('ui', { sidebarOpen: false });
   }
@@ -22,7 +27,7 @@ document.addEventListener('alpine:init', () => {
   const ui = Alpine.store('ui');
   console.log('[ui] initial:', ui);
 
-  // logger delle modifiche
+  // piccolo logger dei cambi di sidebar
   let _open = ui.sidebarOpen;
   Object.defineProperty(ui, 'sidebarOpen', {
     get(){ return _open; },
@@ -30,7 +35,7 @@ document.addEventListener('alpine:init', () => {
     configurable: true
   });
 
-  // helper da console
+  // helpers da console
   window.__dbg = {
     open(){ ui.sidebarOpen = true; },
     close(){ ui.sidebarOpen = false; },
