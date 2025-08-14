@@ -1,45 +1,66 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RagSendController;
 
 /*
 |--------------------------------------------------------------------------
 | Web Routes
 |--------------------------------------------------------------------------
+|
+| - "/" è unico entry-point:
+|   * guest  -> mostra landing pubblica
+|   * authed -> serve direttamente la chat (ChatController@index)
+| - Le API della chat stanno sotto /api e sono dietro auth+verified
+|
 */
 
-// Home → Chat (protetta da login)
-Route::get('/', [ChatController::class, 'index'])
-    ->middleware(['auth', 'verified'])
-    ->name('chat.index');
+// Entry point unico: guest vs authed (compat con route('chat.index'))
+Route::get('/', function (ChatController $chat) {
+    if (auth()->check()) {
+        // Utente loggato -> render chat direttamente
+        return $chat->index();
+    }
+    // Guest -> landing pubblica
+    return view('landing');
+})->name('chat.index');
 
-// Dashboard Breeze (se ti serve tenerla)
-Route::get('/dashboard', function () {
-    return view('dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+// Alias comuni/legacy
+Route::get('/home', fn () => redirect()->route('chat.index'))->name('home');
+Route::get('/dashboard', fn () => redirect()->route('chat.index'))->name('dashboard'); // ← fix per Breeze
 
-// API Chat (Ajax) — tutte dietro login
+// Gruppo autenticato
 Route::middleware(['auth', 'verified'])->group(function () {
-    // albero progetti/cartelle
-    Route::get('/api/projects', [ChatController::class, 'listProjects'])->name('projects.list');
-    // storico messaggi di un progetto
-    Route::get('/api/messages', [ChatController::class, 'listMessages'])->name('messages.list');
-    // crea progetto da path (Cartella/Sub/Progetto o SoloNome)
-    Route::post('/api/projects', [ChatController::class, 'createProject'])->name('projects.create');
-    // crea cartella (anche annidata)
-    Route::post('/api/folders', [ChatController::class, 'createFolder'])->name('folders.create');
 
-    // invia messaggio al modello (usa SEMPRE la tab attiva lato client)
+    // === API Chat (Ajax) ===
+    Route::prefix('api')->group(function () {
+        // Albero progetti/cartelle
+        Route::get('/projects', [ChatController::class, 'listProjects'])->name('projects.list');
+        // Storico messaggi di un progetto
+        Route::get('/messages', [ChatController::class, 'listMessages'])->name('messages.list');
+
+        // Crea progetto da path (Cartella/Sub/Progetto o SoloNome)
+        Route::post('/projects', [ChatController::class, 'createProject'])->name('projects.create');
+        // Elimina progetto
+        Route::delete('/projects/{projectId}', [ChatController::class, 'deleteProject'])->name('projects.delete');
+
+        // Crea cartella (anche annidata)
+        Route::post('/folders', [ChatController::class, 'createFolder'])->name('folders.create');
+        // Elimina cartella (ricorsiva)
+        Route::delete('/folders/{folderId}', [ChatController::class, 'deleteFolder'])->name('folders.delete');
+    });
+
+    // Invia messaggio al modello (usa SEMPRE la tab attiva lato client)
     Route::post('/send', [ChatController::class, 'send'])->name('chat.send');
+
+    // Stats (se vuoi tenerla privata)
+    Route::get('/chat/stats', [ChatController::class, 'stats'])->name('chat.stats');
+
+    // Endpoint RAG (protetto)
+    Route::post('/rag/send', [RagSendController::class, 'send'])->name('rag.send');
 });
-
-Route::get('/chat/stats', [\App\Http\Controllers\ChatController::class, 'stats'])
-    ->middleware(['auth']) // se vuoi proteggerla
-    ->name('chat.stats');
-
-
 
 // Profili Breeze
 Route::middleware('auth')->group(function () {
@@ -49,4 +70,4 @@ Route::middleware('auth')->group(function () {
 });
 
 // Auth routes Breeze
-require __DIR__.'/auth.php';
+require __DIR__ . '/auth.php';

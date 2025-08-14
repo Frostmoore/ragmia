@@ -34,5 +34,12 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'openai' => [
+        'key'         => env('OPENAI_API_KEY'),
+        'base'        => env('OPENAI_BASE','https://api.openai.com'),
+        'main_model'  => env('OPENAI_MAIN_MODEL','gpt-5-thinking'),
+        'cheap_model' => env('OPENAI_CHEAP_MODEL','gpt-4o-mini'),
+    ],
+
 
 ];

@@ -19,6 +19,7 @@ use App\Services\Chat\PreTurnProfileUpdater;
 use App\Services\Chat\ContextHintService;
 use App\DTOs\Plan;
 
+
 use App\Services\Chat\Send\SendRequest;
 use App\Services\Chat\Send\SendCoordinator;
 
@@ -41,49 +42,27 @@ class ChatController extends Controller
 
     public function index()
     {
-        $userId = (int) auth()->id();
+        $folders = Folder::with([
+            'projects',
+            'children.projects',
+            'children.children.projects',
+        ])->whereNull('parent_id')->orderBy('name')->get();
 
-        $folders = Folder::query()
-            ->forUser($userId)
-            ->whereNull('parent_id')
-            ->with([
-                'projects' => fn($q) => $q->forUser($userId)->orderBy('name'),
-                'children' => fn($q) => $q->forUser($userId)->orderBy('name'),
-                'children.projects' => fn($q) => $q->forUser($userId)->orderBy('name'),
-                'children.children' => fn($q) => $q->forUser($userId)->orderBy('name'),
-                'children.children.projects' => fn($q) => $q->forUser($userId)->orderBy('name'),
-            ])
-            ->orderBy('name')
-            ->get();
-
-        $projectsNoFolder = Project::query()
-            ->forUser($userId)
-            ->whereNull('folder_id')
-            ->orderBy('name')
-            ->get();
+        $projectsNoFolder = Project::whereNull('folder_id')->orderBy('name')->get();
 
         return view('chat.index', compact('folders', 'projectsNoFolder'));
     }
 
     public function listProjects()
     {
-        $userId = (int) auth()->id();
-        return response()->json($this->buildTree($userId));
+        return response()->json($this->buildTree());
     }
 
     public function listMessages(Request $req)
     {
-        $userId    = (int) auth()->id();
         $projectId = (int) $req->query('project_id');
 
-        // opzionale: verifica che il progetto sia dell'utente
-        $project = Project::forUser($userId)->find($projectId);
-        if (!$project) {
-            return response()->json(['messages' => []]);
-        }
-
-        $messages = Message::forUser($userId)
-            ->where('project_id', $projectId)
+        $messages = Message::where('project_id', $projectId)
             ->orderBy('created_at','asc')
             ->get(['role','content','created_at']);
 
@@ -97,8 +76,7 @@ class ChatController extends Controller
             return response()->json(['error' => 'Path vuoto'], 422);
         }
 
-        $userId  = (int) auth()->id();
-        $project = $this->resolveOrCreateProjectByPath($path, $userId);
+        $project = $this->resolveOrCreateProjectByPath($path);
         return response()->json(['project' => $project], 201);
     }
 
@@ -107,24 +85,22 @@ class ChatController extends Controller
         $path = trim($req->input('path',''));
         if ($path === '') return response()->json(['error' => 'Path cartella vuoto'], 422);
 
-        $userId = (int) auth()->id();
-        $folder = $this->resolveOrCreateFolderPath($path, $userId);
-        $tree   = $this->buildTree($userId);
+        $folder = $this->resolveOrCreateFolderPath($path);
+        $tree   = $this->buildTree();
 
         return response()->json(['folder' => $folder, 'tree' => $tree], 201);
     }
 
     public function stats()
     {
-        $start  = now()->startOfMonth();
-        $end    = now()->endOfMonth();
-        $userId = (int) auth()->id();
+        $start = now()->startOfMonth();
+        $end   = now()->endOfMonth();
 
         $q = \DB::table('messages')
             ->whereBetween('created_at', [$start, $end])
-            ->where('role', 'assistant')
-            ->where('user_id', $userId);
+            ->where('role', 'assistant');
 
+        // Se vuoi filtrare per utente, aggiungi qui i tuoi where
         $tokens = (int) $q->sum('tokens_total');
         $cost   = (float) $q->sum('cost_usd');
 
@@ -136,26 +112,28 @@ class ChatController extends Controller
 
     public function deleteProject(int $projectId)
     {
-        $userId = (int) auth()->id();
-        $project = Project::forUser($userId)->find($projectId);
+        $project = Project::find($projectId);
         if (!$project) {
             return response()->json(['error' => 'Progetto non trovato'], 404);
         }
 
         $deleted = ['projects' => 0, 'messages' => 0];
 
-        DB::transaction(function () use ($project, &$deleted, $userId) {
-            $msgIds = Message::forUser($userId)->where('project_id', $project->id)->pluck('id');
+        DB::transaction(function () use ($project, &$deleted) {
+            // Messaggi del progetto (embedding si cancellano in cascata se hai messo FK -> cascade)
+            $msgIds = Message::where('project_id', $project->id)->pluck('id');
             $deleted['messages'] = $msgIds->count();
             if ($deleted['messages'] > 0) {
                 Message::whereIn('id', $msgIds)->delete();
             }
 
+            // Progetto
             $deleted['projects'] = 1;
             $project->delete();
         });
 
-        $tree = $this->buildTree($userId);
+        // Ricostruisci l’albero per la sidebar
+        $tree = $this->buildTree();
 
         return response()->json([
             'ok'      => true,
@@ -166,34 +144,38 @@ class ChatController extends Controller
 
     public function deleteFolder(int $folderId)
     {
-        $userId = (int) auth()->id();
-        $root = Folder::forUser($userId)->find($folderId);
+        $root = Folder::find($folderId);
         if (!$root) {
             return response()->json(['error' => 'Cartella non trovata'], 404);
         }
 
         $deleted = ['folders' => 0, 'projects' => 0, 'messages' => 0];
 
-        DB::transaction(function () use ($root, &$deleted, $userId) {
-            $folderIds = $this->collectFolderIds($root->id, $userId);
+        DB::transaction(function () use ($root, &$deleted) {
+            // 1) raccogli tutti gli id cartella del sottoalbero (inclusa root)
+            $folderIds = $this->collectFolderIds($root->id);
             $deleted['folders'] = count($folderIds);
 
-            $projectIds = Project::forUser($userId)->whereIn('folder_id', $folderIds)->pluck('id')->all();
+            // 2) prendi tutti i progetti nelle cartelle raccolte
+            $projectIds = Project::whereIn('folder_id', $folderIds)->pluck('id')->all();
             $deleted['projects'] = count($projectIds);
 
+            // 3) cancella messaggi dei progetti (embedding cascata via FK)
             if ($projectIds) {
-                $msgIds = Message::forUser($userId)->whereIn('project_id', $projectIds)->pluck('id');
+                $msgIds = Message::whereIn('project_id', $projectIds)->pluck('id');
                 $deleted['messages'] = $msgIds->count();
                 if ($deleted['messages'] > 0) {
                     Message::whereIn('id', $msgIds)->delete();
                 }
+                // 4) cancella progetti
                 Project::whereIn('id', $projectIds)->delete();
             }
 
+            // 5) cancella cartelle (foglie -> root). Con whereIn basta: FK figli->parent con cascade non è necessario se non definito.
             Folder::whereIn('id', $folderIds)->delete();
         });
 
-        $tree = $this->buildTree($userId);
+        $tree = $this->buildTree();
 
         return response()->json([
             'ok'      => true,
@@ -205,7 +187,7 @@ class ChatController extends Controller
     /**
      * Raccoglie tutti gli ID cartella del sottoalbero (BFS) includendo la root.
      */
-    private function collectFolderIds(int $rootId, int $userId): array
+    private function collectFolderIds(int $rootId): array
     {
         $ids   = [];
         $queue = [$rootId];
@@ -214,13 +196,15 @@ class ChatController extends Controller
             $id = array_shift($queue);
             $ids[] = $id;
 
-            $children = Folder::forUser($userId)->where('parent_id', $id)->pluck('id')->all();
+            $children = Folder::where('parent_id', $id)->pluck('id')->all();
             foreach ($children as $cid) {
                 $queue[] = $cid;
             }
         }
         return $ids;
     }
+
+
 
     // ===== Core: invio messaggi =====
 
@@ -231,8 +215,7 @@ class ChatController extends Controller
         $auto   = $request->boolean('auto', true);
         if ($path === '') $path = 'Default';
 
-        $userId = (int) (auth()->id() ?? 0);
-        $project = $this->resolveOrCreateProjectByPath($path, $userId);
+        $project = $this->resolveOrCreateProjectByPath($path);
         $projectId = (int) data_get($project, 'id');
         if (!$projectId) {
             \Log::error('Impossibile risolvere/creare Project', ['path'=>$path,'project'=>$project]);
@@ -242,6 +225,7 @@ class ChatController extends Controller
         $model         = (string)$request->input('model', env('OPENAI_MODEL','openai:gpt-5'));
         $compressModel = (string)$request->input('compress_model', 'openai:gpt-4o-mini');
         $maxCompletion = (int)($request->input('max_tokens') ?? 2000);
+        $userId        = (int)(auth()->id() ?? 0);
 
         // 👇 supporto a più alias per comodità (raw_user / raw / no_compress)
         $useRawUser = $request->boolean('raw_user',
@@ -259,7 +243,7 @@ class ChatController extends Controller
             model:         $model,
             compressModel: $compressModel,
             maxTokens:     $maxCompletion,
-            useRawUser:    $useRawUser,
+            useRawUser:    $useRawUser,  // 👈 qui
         );
 
         $result = $this->sender->handle($dto, fn(string $m,int $in,int $out) => $this->computeCostUsd($m,$in,$out));
@@ -272,6 +256,8 @@ class ChatController extends Controller
         ], 200);
     }
 
+
+
     // ===== Helpers minimi rimasti nel Controller =====
 
     protected function respond(Request $request, array $payload, int $status = 200)
@@ -281,6 +267,7 @@ class ChatController extends Controller
 
     protected function computeCostUsd(string $model, int $in, int $out): float
     {
+        // Se hai un file di pricing, leggi da config; altrimenti 0.0
         $pricing = config("ai.pricing.$model");
         if (!$pricing) return 0.0;
 
@@ -290,21 +277,19 @@ class ChatController extends Controller
         return round((($in * $pin) + ($out * $pout)) / 1_000_000, 6);
     }
 
-    protected function resolveOrCreateProjectByPath(string $path, int $userId): \App\Models\Project
+    protected function resolveOrCreateProjectByPath(string $path): \App\Models\Project
     {
         $path = preg_replace('#/{2,}#','/',$path);
         $path = trim($path, '/');
 
-        if ($existing = \App\Models\Project::where('path', $path)->where('user_id', $userId)->first()) {
-            return $existing;
-        }
+        if ($existing = \App\Models\Project::where('path', $path)->first()) return $existing;
 
         $parts = $path === '' ? ['Default'] : explode('/', $path);
         $name  = array_pop($parts);
 
         $parentId = null;
         if (!empty($parts)) {
-            $folder   = $this->resolveOrCreateFolderPath(implode('/', $parts), $userId);
+            $folder   = $this->resolveOrCreateFolderPath(implode('/', $parts));
             $parentId = $folder->id;
         }
 
@@ -312,11 +297,10 @@ class ChatController extends Controller
             'name'      => $name,
             'folder_id' => $parentId,
             'path'      => $path ?: 'Default',
-            'user_id'   => $userId,
         ]);
     }
 
-    private function resolveOrCreateFolderPath(string $path, int $userId): \App\Models\Folder
+    private function resolveOrCreateFolderPath(string $path): \App\Models\Folder
     {
         $path  = preg_replace('#/{2,}#','/',$path);
         $path  = trim($path, '/');
@@ -328,23 +312,20 @@ class ChatController extends Controller
         foreach ($parts as $folderName) {
             $folderName = trim($folderName);
             $folder = \App\Models\Folder::firstOrCreate(
-                ['name' => $folderName, 'parent_id' => $parentId, 'user_id' => $userId],
-                []
+                ['name' => $folderName, 'parent_id' => $parentId],
+                ['parent_id' => $parentId]
             );
             $parentId = $folder->id;
         }
 
         if (!$folder) {
-            $folder = \App\Models\Folder::firstOrCreate(
-                ['name' => 'Generale', 'parent_id' => null, 'user_id' => $userId],
-                []
-            );
+            $folder = \App\Models\Folder::firstOrCreate(['name' => 'Generale', 'parent_id' => null]);
         }
 
         return $folder;
     }
 
-    private function buildTree(int $userId): array
+    private function buildTree(): array
     {
         $toArray = function($folder) use (&$toArray){
             return [
@@ -355,14 +336,11 @@ class ChatController extends Controller
             ];
         };
 
-        $roots = Folder::query()
-            ->forUser($userId)
-            ->with(['children.children','projects' => fn($q) => $q->forUser($userId)])
+        $roots = Folder::with(['children.children','projects'])
             ->whereNull('parent_id')->orderBy('name')->get();
 
         $tree     = array_map($toArray, $roots->all());
-        $noFolder = Project::forUser($userId)
-            ->whereNull('folder_id')->orderBy('name')->get(['id','name','path'])->toArray();
+        $noFolder = Project::whereNull('folder_id')->orderBy('name')->get(['id','name','path'])->toArray();
 
         return ['folders' => $tree, 'projectsNoFolder' => $noFolder];
     }

@@ -4,32 +4,35 @@ declare(strict_types=1);
 namespace App\Services\Chat\Send;
 
 use App\DTOs\Plan;
-use App\Services\LLM\LlmClient;
+use App\Models\Project;
+use App\Repositories\MessageRetrieval;
 use App\Services\Chat\HistoryService;
-use App\Services\Chat\MemoryService;
 use App\Services\Chat\MemoryMerger;
+use App\Services\Chat\MemoryService;
+use App\Services\Chat\PayloadInjector;
 use App\Services\Chat\PlannerService;
-use App\Services\Chat\PromptBuilder;
 use App\Services\Chat\PostTurnUpdater;
+use App\Services\Chat\PromptBuilder;
+use App\Services\Chat\PreTurnProfileUpdater;   // ✅ CORRETTO
+use App\Services\Chat\ContextHintService;      // ✅ CORRETTO
+use App\Services\LLM\LlmClient;
+use App\Services\Rag\GlobalContextService;
 
-/**
- * Coordina l'intero turno di /send in step piccoli e testabili.
- * Dipendenze opzionali:
- *  - PreProfileService  (ensureBeforeTurn)
- *  - ContextHints       (addHints / getHintsForPrompt / renderForPrompt)
- */
 class SendCoordinator
 {
     public function __construct(
-        private LlmClient      $llm,
-        private HistoryService $history,
-        private MemoryService  $mem,
-        private MemoryMerger   $merger,
-        private PlannerService $planner,
-        private PromptBuilder  $builder,
-        private PostTurnUpdater $updater,
-        private ?\App\Services\Chat\PreProfileService $preProfile = null,
-        private ?\App\Services\Chat\ContextHints      $hints      = null,
+        private LlmClient            $llm,
+        private HistoryService       $history,
+        private MemoryService        $mem,
+        private MemoryMerger         $merger,
+        private PlannerService       $planner,
+        private PromptBuilder        $builder,
+        private PostTurnUpdater      $updater,
+        private ?PreTurnProfileUpdater $preProfile = null,     // ✅ CORRETTO
+        private ?ContextHintService    $hints      = null,     // ✅ CORRETTO
+        private GlobalContextService    $globalCtx,
+        private MessageRetrieval        $retrieval,
+        private PayloadInjector         $injector,
     ) {}
 
     public function handle(SendRequest $r, ?callable $costFn = null): SendResult
@@ -37,11 +40,26 @@ class SendCoordinator
         // 0) append user
         $this->history->appendUser($r->projectId, $r->prompt);
 
-        // 1) memorie (come prima)
+        // 0.b) ===== RAG CONTEXT (GLOBAL + PROJECT + SOURCES) =====
+        $userId  = (int)($r->userId ?? 0);
+        $g       = $this->globalCtx->get($userId);
+        $gState  = $g['state'];
+        $gShort  = (string)$g['short'];
+
+        $project = Project::find($r->projectId);
+        $pState  = $this->normalizeProjectState($project?->thread_state ?? []);
+        $pShort  = (string)($project?->short_summary ?? '');
+
+        $retr        = $this->retrieval->retrieveForQuery($r->projectId, $r->prompt, 8, 3, 1200);
+        $sourcesText = $this->renderSources($retr['chunks'] ?? []);
+
+        // 1) memorie
         $projectMemoryJson = $r->auto ? $this->mem->getProjectMemoryJson($r->projectId) : '';
         $userProfileJson   = ($r->auto && $r->userId) ? $this->mem->getUserProfileJson($r->userId) : '';
         if ($r->auto && $r->userId && $this->preProfile) {
-            $userProfileJson = $this->preProfile->ensureBeforeTurn($r->compressModel, $r->userId, $r->prompt, $userProfileJson);
+            $userProfileJson = $this->preProfile->ensureBeforeTurn(
+                $r->compressModel, $r->userId, $r->prompt, $userProfileJson
+            );
         }
         $projectMemArr  = $this->mem->decode($projectMemoryJson);
         $userProfileArr = $this->mem->decode($userProfileJson);
@@ -50,24 +68,26 @@ class SendCoordinator
         $historyArr = $this->history->recent($r->projectId, 30);
 
         // 3) planner
-        $plan = new \App\DTOs\Plan();
+        $plan = new Plan();
         $plannerRaw = '';
         if ($r->auto) {
             try {
-                $plan = $this->planner->plan($r->compressModel, $userProfileJson, $projectMemoryJson, $historyArr, $r->prompt);
+                $plan = $this->planner->plan(
+                    $r->compressModel, $userProfileJson, $projectMemoryJson, $historyArr, $r->prompt
+                );
                 $plannerRaw = $plan->raw;
             } catch (\Throwable $e) {
                 \Log::warning('Planner fallito', ['err' => $e->getMessage()]);
             }
         }
-        if (!$plan->final_user) $plan->final_user = $r->prompt;
-
-        // 👇 NUOVO: se richiesto, usa SEMPRE il testo utente raw nel blocco [USER]
+        if (!$plan->final_user) {
+            $plan->final_user = $r->prompt;
+        }
         if ($r->useRawUser) {
             $plan->final_user = $r->prompt;
         }
 
-        // 3b) merge memorie (identico)
+        // 3b) merge memorie
         if ($r->auto) {
             $frame = [
                 'theme'    => $plan->theme,
@@ -95,7 +115,7 @@ class SendCoordinator
             }
         }
 
-        // 3c) hints (come già fatto)
+        // 3c) hints (opzionale)
         $memoryHintsText = '';
         if ($r->auto && $this->hints) {
             $frameHints = [];
@@ -117,16 +137,26 @@ class SendCoordinator
                     'language'   => $plan->language,
                     'genre'      => $plan->genre,
                 ];
-                $topHints = $this->hints->getHintsForPrompt($r->userId ?: null, $r->projectId, $r->prompt, $planArr, 12);
+                $topHints = $this->hints->getHintsForPrompt(
+                    $r->userId ?: null, $r->projectId, $r->prompt, $planArr, 12
+                );
                 $memoryHintsText = $this->hints->renderForPrompt($topHints);
             } catch (\Throwable $e) {
                 \Log::warning('ContextHints failure', ['err' => $e->getMessage()]);
             }
         }
 
-        // 4) payload (identico, ma con $memoryHintsText se il tuo builder lo supporta)
+        // 4) payload base
         $sourceText = $this->builder->determineSourceText($plan, $historyArr);
-        $final      = $this->builder->buildFinalPayload($plan, $userProfileJson, $projectMemoryJson, $sourceText, $memoryHintsText);
+        $final      = $this->builder->buildFinalPayload(
+            $plan, $userProfileJson, $projectMemoryJson, $sourceText, $memoryHintsText
+        );
+
+        // 4.b) ===== inietta SEMPRE RAG (GLOBAL+PROJECT+SOURCES) già compresso =====
+        $extraRaw = $this->renderExtraContext($gState, $gShort, $pState, $pShort, $sourcesText);
+        $extraCmp = $this->compressExtra($r->compressModel, $extraRaw, 1600);
+        $src = $sourcesText ? "\n\n[SOURCES]\n".mb_strimwidth($sourcesText, 0, 2000, " […]") : '';
+        $final = $this->injector->inject($final, $extraCmp.$src);
 
         if (!empty($final['needs_source_but_missing'])) {
             return new SendResult(
@@ -149,15 +179,15 @@ class SendCoordinator
         ], ['max_tokens'=>$r->maxTokens,'temperature'=>1]);
 
         $answer = $resp['text'] ?? 'Nessun contenuto nella risposta API.';
-        $in  = (int)($resp['usage']['input']  ?? 0);
-        $out = (int)($resp['usage']['output'] ?? 0);
-        $tot = (int)($resp['usage']['total']  ?? ($in + $out));
-        $cost= $costFn ? (float)$costFn($r->model, $in, $out) : 0.0;
+        $in     = (int)($resp['usage']['input']  ?? 0);
+        $out    = (int)($resp['usage']['output'] ?? 0);
+        $tot    = (int)($resp['usage']['total']  ?? ($in + $out));
+        $cost   = $costFn ? (float)$costFn($r->model, $in, $out) : 0.0;
 
         // 6) save
         $this->history->appendAssistant($r->projectId, $answer, $r->model, $in, $out, $tot, $cost);
 
-        // 7) updater
+        // 7) updater (profilo/memorie) + aggiornamento GLOBAL/PROJECT
         $compressUsage = null;
         if ($r->auto) {
             $frame = [
@@ -174,6 +204,13 @@ class SendCoordinator
             } catch (\Throwable $e) {
                 \Log::warning('PostTurnUpdater fallito', ['err'=>$e->getMessage()]);
             }
+
+            // 7.b) GLOBAL & PROJECT context (sempre)
+            try { $this->globalCtx->updateFromTurn($userId, $r->prompt, $answer); }
+            catch (\Throwable $e) { \Log::warning('GlobalContext update fallito', ['err'=>$e->getMessage()]); }
+
+            try { $this->updateProjectContext($r->compressModel, $project, $pShort, $pState, $r->prompt, $answer); }
+            catch (\Throwable $e) { \Log::warning('ProjectContext update fallito', ['err'=>$e->getMessage()]); }
         }
 
         return new SendResult(
@@ -183,5 +220,80 @@ class SendCoordinator
             ['planner_raw'=>$plannerRaw,'final_input'=>$final['debug'] ?? '','need_source'=>false]
         );
     }
-}
 
+    // ============== Helpers privati ==============
+
+    private function renderSources(array $chunks): string
+    {
+        $lines = [];
+        foreach ($chunks as $i => $c) {
+            $head = "SOURCE #{$i} (type={$c['type']}; id={$c['id']}; why={$c['why']})";
+            $lines[] = $head."\n".trim((string)$c['content']);
+        }
+        return implode("\n\n", $lines);
+    }
+
+    private function renderExtraContext(array $gState, string $gShort, array $pState, string $pShort, string $sources): string
+    {
+        // Comprimi solo GLOBAL/PROJECT; le SOURCES le terremo a parte
+        return
+            "[GLOBAL_STATE]\n".json_encode($gState, JSON_UNESCAPED_UNICODE)
+            ."\n\n[GLOBAL_SUMMARY]\n".$gShort
+            ."\n\n[PROJECT_STATE]\n".json_encode($pState, JSON_UNESCAPED_UNICODE)
+            ."\n\n[PROJECT_SUMMARY]\n".$pShort;
+    }
+
+    private function compressExtra(string $compressModel, string $extra, int $targetTokens): string
+    {
+        $resp = $this->llm->call($compressModel, [
+            ['role'=>'system','content'=>"Sei un compressore di contesto. Mantieni SOLO policy/fatti/decisioni utili. Target {$targetTokens} token. Rispondi con testo secco, senza preamboli."],
+            ['role'=>'user','content'=>$extra],
+        ], ['max_tokens'=>$targetTokens,'temperature'=>0]);
+        return (string)($resp['text'] ?? $extra);
+    }
+
+    private function normalizeProjectState($state): array
+    {
+        if (!is_array($state)) $state = json_decode((string)$state, true) ?: [];
+        $state += [
+            'project'      => $state['project'] ?? null,
+            'obiettivi'    => $state['obiettivi'] ?? [],
+            'vincoli'      => $state['vincoli'] ?? [],
+            'decisioni'    => $state['decisioni'] ?? [],
+            'file_toccati' => $state['file_toccati'] ?? [],
+            'schema_db'    => $state['schema_db'] ?? [],
+            'todo_aperti'  => $state['todo_aperti'] ?? [],
+            'assunzioni'   => $state['assunzioni'] ?? [],
+            'glossario'    => $state['glossario'] ?? [],
+        ];
+        return $state;
+    }
+
+    private function updateProjectContext(string $compressModel, ?Project $project, string $prevShort, array $prevState, string $u, string $a): void
+    {
+        if (!$project) return;
+
+        // Short summary
+        $sum = $this->llm->call($compressModel, [
+            ['role'=>'system','content'=>'Running summary PROGETTO (10–20 righe): decisioni, vincoli, next.'],
+            ['role'=>'user','content'=>"PREV:\n{$prevShort}\n\nUSER:\n{$u}\n\nASSISTANT:\n{$a}"],
+        ], ['max_tokens'=>400,'temperature'=>0]);
+        $newShort = $sum['text'] ?? $prevShort;
+
+        // State JSON
+        $schema = json_encode([
+            'obiettivi'=>[],'vincoli'=>[],'decisioni'=>[],'file_toccati'=>[],
+            'schema_db'=>[],'todo_aperti'=>[],'assunzioni'=>[],'glossario'=>[]
+        ], JSON_UNESCAPED_UNICODE);
+        $st = $this->llm->call($compressModel, [
+            ['role'=>'system','content'=>"Dato stato JSON del PROGETTO e ultimo scambio, restituisci SOLO JSON valido con le stesse chiavi. Schema: {$schema}"],
+            ['role'=>'user','content'=>"PREV_STATE:\n".json_encode($prevState, JSON_UNESCAPED_UNICODE)."\n\nUSER:\n{$u}\n\nASSISTANT:\n{$a}"],
+        ], ['max_tokens'=>700,'temperature'=>0]);
+        $newState = json_decode($st['text'] ?? '', true);
+        if (!is_array($newState)) $newState = $prevState;
+
+        $project->short_summary = $newShort;
+        $project->thread_state  = $newState;
+        $project->save();
+    }
+}

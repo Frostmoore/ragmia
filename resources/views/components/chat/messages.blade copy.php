@@ -8,64 +8,25 @@
     x-data="{
       prevTab: null,
       prevLen: 0,
-
       toBottom() {
+        // scrolla questo stesso elemento (il container scrollabile)
         const el = this.$el;
         el.scrollTop = el.scrollHeight;
-      },
-
-      async loadActiveIfNeeded() {
-        const chat = Alpine.store('chat');
-        if (!chat || typeof chat.activeTab !== 'function') return;
-
-        const tab = chat.activeTab();
-        if (!tab) return;
-
-        // init flag/array
-        if (typeof tab._loaded === 'undefined') tab._loaded = false;
-        if (typeof tab._loading === 'undefined') tab._loading = false;
-        if (!Array.isArray(tab.messages)) tab.messages = [];
-
-        // già caricata o in corso
-        if (tab._loaded || tab._loading) return;
-
-        tab._loading = true;
-        try {
-          const res = await fetch('/api/messages?project_id=' + encodeURIComponent(tab.project_id), {
-            headers: { 'Accept': 'application/json' }
-          });
-          const data = await res.json();
-          const msgs = Array.isArray(data?.messages) ? data.messages : [];
-          msgs.forEach(m => tab.messages.push({ role: m.role, content: String(m.content ?? '') }));
-        } catch (e) {
-          // niente UI extra: se vuoi loggare, scommenta
-          // console.warn('Errore caricando storico', e);
-        } finally {
-          tab._loading = false;
-          tab._loaded = true;
-          // persisti se supportato
-          if (chat?.persistTabs) chat.persistTabs();
-        }
       }
     }"
     x-init="
+      // primo render → giù in fondo
       prevTab = Alpine.store('chat').activeTabId;
       prevLen = Alpine.store('chat').activeTab()?.messages?.length || 0;
-      // carica SUBITO lo storico della tab attiva appena monti
-      $nextTick(() => { loadActiveIfNeeded(); requestAnimationFrame(() => toBottom()); });
+      $nextTick(() => requestAnimationFrame(() => toBottom()));
     "
     x-effect="
       // se cambia tab o cambia la lunghezza dei messaggi → giù in fondo
       (() => {
         const t = Alpine.store('chat').activeTabId;
         const len = Alpine.store('chat').activeTab()?.messages?.length || 0;
-        if (t !== prevTab) {
-          prevTab = t;
-          // appena cambi tab, prova a caricare subito lo storico
-          loadActiveIfNeeded();
-        }
         if (t !== prevTab || len !== prevLen) {
-          prevLen = len;
+          prevTab = t; prevLen = len;
           $nextTick(() => requestAnimationFrame(() => toBottom()));
         }
       })()
@@ -97,6 +58,7 @@
                 </div>
             </template>
 
+            <!-- NORMAL SEGMENTS -->
             <!-- NORMAL SEGMENTS -->
             <template x-if="m.role !== 'debug'">
                 <template x-for="(seg, sidx) in $store.chat.parseSegments(m.content)" :key="i+'-'+sidx">
@@ -170,8 +132,10 @@
                     </div>
                     </template>
 
-                    <!-- NORMAL CODE (canvas meta) -->
+
+                    <!-- NORMAL CODE -->
                     <template x-if="seg.type === 'code' && ( (seg.lang||'').startsWith('canvas') || (seg.meta && seg.meta.canvas) )">
+
                         <div
                         class="relative rounded-2xl text-sm overflow-hidden p-3"
                         :class="m.role === 'user'
@@ -198,6 +162,7 @@
             </div>
         </div>
         </template>
+
 
       <div x-show="$store.chat.thinking" class="flex justify-start">
         <div class="max-w-[80%] px-4 py-2 rounded-2xl shadow bg-white border border-gray-200 text-sm

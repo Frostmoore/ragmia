@@ -3,9 +3,12 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use App\Models\Message;
+use App\Observers\MessageObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
+    public const HOME = '/';
     /**
      * Register any application services.
      */
@@ -19,6 +22,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Message::observe(MessageObserver::class);
     }
 }
