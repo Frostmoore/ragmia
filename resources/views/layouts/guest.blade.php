@@ -5,6 +5,15 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
+        
+        <!-- Favicon / App Icons -->
+        <link rel="icon" type="image/png"
+            href="{{ asset('img/bt-monogram-light.png') }}"
+            media="(prefers-color-scheme: light)">
+        <link rel="icon" type="image/png"
+            href="{{ asset('img/bt-monogram-dark.png') }}"
+            media="(prefers-color-scheme: dark)">
+
         <title>{{ config('app.name', 'Laravel') }}</title>
 
         <!-- Dark mode auto (class-based) -->
