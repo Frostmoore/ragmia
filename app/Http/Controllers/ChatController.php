@@ -240,7 +240,8 @@ class ChatController extends Controller
         }
 
         $model         = (string)$request->input('model', env('OPENAI_MODEL','openai:gpt-5'));
-        $compressModel = (string)$request->input('compress_model', 'openai:gpt-4o-mini');
+        // $compressModel = (string)$request->input('compress_model', 'openai:gpt-4o-mini');
+        $compressModel = (string)$request->input('compress_model', 'openai:gpt-4.1-nano'); // prima era gpt-4o-mini
         // $maxCompletion = (int)($request->input('max_tokens') ?? 2000);
         // $maxCompletion = (int)($request->input('max_tokens') ?? env('LLM_MAX_COMPLETION', 4000));
         $maxCompletion = $this->resolveMaxTokens($request);

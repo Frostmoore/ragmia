@@ -112,17 +112,12 @@ class PromptBuilder
             $style = array_values(array_unique(array_merge($style, $hintsParsed['style'])));
         }
 
-        // Evita: forza sempre "diff" tra le cose da evitare
         $avoid = $this->uniqueFlat([
             $plan->avoid ?? [],
             $userProfile['avoid'] ?? [],
             $memPrefs['avoid'] ?? [],
             $hintsParsed['avoid'] ?? [],
         ]);
-        $avoidLower = array_map('mb_strtolower', $avoid);
-        if (!in_array('diff', $avoidLower, true)) {
-            $avoid[] = 'diff';
-        }
 
         $length = $this->pickFirstNonEmpty([
             $plan->length,
@@ -130,15 +125,10 @@ class PromptBuilder
             'short',
         ]);
 
-        // Modalità "codice": quando il planner richiede codice, imponiamo regole più rigide
-        $strictCodeMode = is_string($plan->format) && mb_stripos($plan->format, 'code') !== false;
+        // regole codice
+        $codeRules = 'usa diff unificato quando tocchi codice';
 
-        // Regole codice: niente diff; blocchi fenced obbligatori
-        $codeRules = $strictCodeMode
-            ? 'per NUOVO codice: inizia SUBITO con un unico blocco racchiuso tra tre apici (```), indicando il linguaggio se evidente (es. ```python); termina con ```; nessun diff (+/-), nessuna prosa prima o dopo salvo esplicita richiesta.'
-            : 'se includi codice, racchiudilo sempre tra tre apici (```), indica il linguaggio se evidente; non usare diff (+/-).';
-
-        // target stack (solo come riferimento se il codice non è linguaggio web)
+        // target stack
         $phpVersion     = '8.3.21';
         $laravelVersion = '12.x';
 
@@ -155,12 +145,12 @@ class PromptBuilder
             "Sei un assistente che risponde in {$lang}.\n\n" .
             "Regole di stile:\n" .
             "- Tono: {$styleLine}\n" .
-            "- Formato: {$codeRules}\n" .
+            "- Formato: nessun formato speciale di default. Se tocchi codice, {$codeRules}.\n" .
             "- Lunghezza: {$lenLine}\n\n" .
             "Politiche:\n" .
             ($askIfMissing ? "- Se manca il contesto recente, chiedi chiarimenti brevi.\n" : "") .
             ($neverInvent  ? "- Non inventare mai fatti.\n" : "") .
-            "Quando fornisci codice PHP/Laravel, target: PHP {$phpVersion}, Laravel {$laravelVersion}.\n" .
+            "Quando fornisci codice, target: PHP {$phpVersion}, Laravel {$laravelVersion}.\n" .
             ($avoidLine ? "\nEvita: {$avoidLine}\n" : "")
         );
 
@@ -188,15 +178,6 @@ class PromptBuilder
 
         // ---- 4) User message (+ eventuale SORGENTE) ----
         $userContent = (string)$plan->final_user;
-
-        // Se siamo in strictCodeMode, rendi l'istruzione dell'utente ancora più chiara
-        if ($strictCodeMode) {
-            // Non aggiungiamo testo rumoroso: solo una frase prescrittiva semplice.
-            $userContent = "Restituisci il codice richiesto in un unico blocco markdown tra tre apici (```), " .
-                           "con l'etichetta del linguaggio se evidente; nessun diff, nessuna prosa extra.\n\n" .
-                           $userContent;
-        }
-
         if ($sourceText !== '') {
             // niente etichette rumorose, ma separatore chiaro
             $userContent .= "\n\n---\nSORGENTE:\n" . $sourceText;

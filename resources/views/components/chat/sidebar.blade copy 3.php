@@ -51,6 +51,7 @@
                     <option value="google:gemini-1.5-flash">Google — Gemini 1.5 Flash</option>
                     <option value="openai:gpt-4o-mini">OpenAI — GPT-4o mini</option>
                     <option value="openai:o3">OpenAI — GPT-o3</option>
+                    <option value="openai:o3-pro">OpenAI — o3-pro</option>
                 </x-select>
             </div>
 
@@ -60,8 +61,6 @@
                     x-model="$store.chat.compress_model"
                     x-on:change="$store.chat.persistTabs && $store.chat.persistTabs()"
                     class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
-                    <option value="openai:gpt-4.1-nano">OpenAI — GPT-4.1 Nano (⚡)</option>
-                    <option value="openai:gpt-4.1-mini">OpenAI — GPT-4.1 Mini (⚡)</option>
                     <option value="openai:gpt-4o-mini">OpenAI — GPT-4o mini</option>
                     <option value="anthropic:claude-3-5-haiku">Anthropic — Claude 3.5 Haiku</option>
                     <option value="google:gemini-1.5-flash">Google — Gemini 1.5 Flash</option>
