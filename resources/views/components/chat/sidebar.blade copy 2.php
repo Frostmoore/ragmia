@@ -1,27 +1,16 @@
 @props(['class' => ''])
 
-@php
-    // Utente "uncapped" (lista da .env LLM_UNCAPPED_USERS, fallback alla tua email)
-    $allow = array_filter(array_map('trim', explode(',', env('LLM_UNCAPPED_USERS', 'r.ronconi@smp-digital.it'))));
-    $isUncapped = auth()->check() && in_array(auth()->user()->email ?? '', $allow, true);
-@endphp
-
 <aside
-    x-data="sidebarActions('{{ csrf_token() }}', {{ $isUncapped ? 'true' : 'false' }})"
+    x-data="sidebarActions('{{ csrf_token() }}')"
     x-init="
         $nextTick(() => {
             if (!$store.chat) { console.error('Alpine $store.chat mancante'); return; }
             // esponi le funzioni ai figli (project-tree ecc.)
             $store.chat.deleteProject = (id, name) => $data.deleteProject(id, name);
             $store.chat.deleteFolder  = (id, name) => $data.deleteFolder(id, name);
-
             // evita undefined su prima render
             $store.chat.folders = $store.chat.folders || [];
             $store.chat.projectsNoFolder = $store.chat.projectsNoFolder || [];
-
-            // init cap token + fetch patch
-            initMaxTokens();
-            patchFetchForMaxTokens();
         })
     "
     {{ $attributes->merge(['class' => "bg-white dark:bg-gray-800 h-full min-h-0 flex flex-col $class"]) }}>
@@ -30,13 +19,13 @@
     <div class="shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
         <div class="text-lg font-semibold text-gray-900 dark:text-gray-100">Progetti</div>
 
-        {{-- Impostazioni --}}
+        {{-- Impostazioni SOLO mobile --}}
         <div class="mt-3 space-y-3">
             <label class="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
                 <span>Auto-contesto</span>
                 <input type="checkbox"
                        x-model="$store.chat.autoContext"
-                       x-on:change="$store.chat.persistTabs && $store.chat.persistTabs()"
+                       x-on:change="$store.chat.persistTabs()"
                        class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800">
             </label>
 
@@ -44,7 +33,7 @@
                 <div class="text-xs mb-1 text-gray-500 dark:text-gray-400">Modello</div>
                 <x-select
                     x-model="$store.chat.model"
-                    x-on:change="$store.chat.persistTabs && $store.chat.persistTabs()"
+                    x-on:change="$store.chat.persistTabs()"
                     class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
                     <option value="openai:gpt-5">OpenAI — GPT-5</option>
                     <option value="anthropic:claude-3-5-haiku">Anthropic — Claude 3.5 Haiku</option>
@@ -59,7 +48,7 @@
                 <div class="text-xs mb-1 text-gray-500 dark:text-gray-400">Compressore</div>
                 <x-select
                     x-model="$store.chat.compress_model"
-                    x-on:change="$store.chat.persistTabs && $store.chat.persistTabs()"
+                    x-on:change="$store.chat.persistTabs()"
                     class="w-full dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
                     <option value="openai:gpt-4o-mini">OpenAI — GPT-4o mini</option>
                     <option value="anthropic:claude-3-5-haiku">Anthropic — Claude 3.5 Haiku</option>
@@ -67,45 +56,12 @@
                 </x-select>
             </div>
 
-            {{-- Limite token risposta (sotto "Compressore") --}}
-            <div>
-                <div class="text-xs mb-1 text-gray-500 dark:text-gray-400 flex items-center justify-between">
-                    <span>Limite token risposta</span>
-                    <span x-show="uncapped"
-                          class="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
-                        NO CAP
-                    </span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <input
-                        type="number"
-                        inputmode="numeric"
-                        min="1"
-                        :max="uncapped ? 120000 : 4000"
-                        x-model.number="$store.chat.maxTokensDesired"
-                        @change="saveMaxTokens()"
-                        class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100
-                               focus:ring-0 focus:border-gray-400 dark:focus:border-gray-500 text-sm px-3 py-1.5">
-                    <button
-                        type="button"
-                        @click="$store.chat.maxTokensDesired = uncapped ? 120000 : 4000; saveMaxTokens()"
-                        class="px-2 py-1 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100
-                               dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">
-                        Reset
-                    </button>
-                </div>
-                <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    <span x-show="!uncapped">Cap server: 4000</span>
-                    <span x-show="uncapped">Cap server: illimitato (interno)</span>
-                </div>
-            </div>
-
             {{-- Usa compressore (se OFF invia il prompt raw) --}}
             <label class="mt-2 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
                 <span>Usa compressore</span>
                 <input type="checkbox"
                        x-model="$store.chat.useCompressor"
-                       x-on:change="$store.chat.persistTabs && $store.chat.persistTabs()"
+                       x-on:change="$store.chat.persistTabs()"
                        class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800">
             </label>
 
@@ -171,7 +127,7 @@
                             <span x-text="p.path"></span>
                         </button>
 
-                        {{-- X delete progetto --}}
+                        {{-- X delete progetto (mobile sempre visibile, desktop al hover) --}}
                         <button
                             type="button"
                             @click.prevent.stop="$store.chat.deleteProject(p.id, p.path)"
@@ -194,70 +150,8 @@
 
 {{-- Helper JS per Alpine (niente backtick) --}}
 <script>
-window.sidebarActions = window.sidebarActions || function (csrfToken, uncapped) {
+window.sidebarActions = window.sidebarActions || function (csrfToken) {
     return {
-        uncapped: !!uncapped,
-
-        // ---- MAX TOKENS (UI + storage + fetch header) ----
-        storageKey: function(name){
-            try {
-                var ns = (this.$store && this.$store.chat && this.$store.chat._ns) ? this.$store.chat._ns : 'ragmia:';
-                return ns + name;
-            } catch(e) { return 'ragmia:' + name; }
-        },
-        maxCap: function() {
-            return this.uncapped ? 120000 : 4000;
-        },
-        initMaxTokens: function(){
-            var key = this.storageKey('max_tokens');
-            var v = localStorage.getItem(key);
-            var cap = this.maxCap();
-            var num = v ? parseInt(v, 10) : cap;
-            if (!num || num < 1) num = cap;
-            if (num > cap) num = cap;
-            if (!this.$store.chat) return;
-            this.$store.chat.maxTokensDesired = num;
-            if (this.$store.chat.persistTabs) this.$store.chat.persistTabs();
-        },
-        saveMaxTokens: function(){
-            if (!this.$store.chat) return;
-            var cap = this.maxCap();
-            var v = parseInt(this.$store.chat.maxTokensDesired || 0, 10);
-            if (!v || v < 1) v = 1;
-            if (v > cap) v = cap;
-            this.$store.chat.maxTokensDesired = v;
-            localStorage.setItem(this.storageKey('max_tokens'), String(v));
-            if (this.$store.chat.persistTabs) this.$store.chat.persistTabs();
-        },
-        patchFetchForMaxTokens: function(){
-            try {
-                if (window.__ragmia_fetch_patched) return;
-                var orig = window.fetch;
-                var self = this;
-                window.fetch = function(input, init) {
-                    try {
-                        var url = (typeof input === 'string') ? input : (input && input.url) ? input.url : '';
-                        var isSend = url.indexOf('/send') !== -1; // Route::post('/send'...)
-                        if (isSend) {
-                            init = init || {};
-                            init.headers = init.headers || {};
-                            // valore attuale (già clampato)
-                            var v = (self.$store && self.$store.chat && self.$store.chat.maxTokensDesired) ? self.$store.chat.maxTokensDesired : self.maxCap();
-                            // imposta header X-Max-Tokens: sarà letto lato server
-                            if (init.headers instanceof Headers) {
-                                init.headers.set('X-Max-Tokens', String(v));
-                            } else {
-                                init.headers['X-Max-Tokens'] = String(v);
-                            }
-                        }
-                    } catch(e) {}
-                    return orig.apply(this, arguments);
-                };
-                window.__ragmia_fetch_patched = true;
-            } catch(e) {}
-        },
-
-        // ---- TREE helpers ----
         async refreshTree() {
             try {
                 const res = await fetch('/api/projects', {

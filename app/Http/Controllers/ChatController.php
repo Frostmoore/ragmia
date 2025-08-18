@@ -241,7 +241,9 @@ class ChatController extends Controller
 
         $model         = (string)$request->input('model', env('OPENAI_MODEL','openai:gpt-5'));
         $compressModel = (string)$request->input('compress_model', 'openai:gpt-4o-mini');
-        $maxCompletion = (int)($request->input('max_tokens') ?? 2000);
+        // $maxCompletion = (int)($request->input('max_tokens') ?? 2000);
+        // $maxCompletion = (int)($request->input('max_tokens') ?? env('LLM_MAX_COMPLETION', 4000));
+        $maxCompletion = $this->resolveMaxTokens($request);
 
         // 👇 supporto a più alias per comodità (raw_user / raw / no_compress)
         $useRawUser = $request->boolean('raw_user',
@@ -366,4 +368,23 @@ class ChatController extends Controller
 
         return ['folders' => $tree, 'projectsNoFolder' => $noFolder];
     }
+
+    private function resolveMaxTokens(\Illuminate\Http\Request $request): int
+    {
+        $defaultCap   = (int) env('LLM_MAX_COMPLETION_DEFAULT', 4000);
+        $superCap     = (int) env('LLM_MAX_COMPLETION_SUPERUSER', 120000);
+        // prende prima dall’header X-Max-Tokens, poi da input('max_tokens')
+        $desired      = (int) ($request->header('X-Max-Tokens') ?? $request->input('max_tokens') ?? 0);
+
+        $user         = $request->user();
+        $allowListRaw = (string) env('LLM_UNCAPPED_USERS', '');
+        $allowList    = array_filter(array_map('trim', explode(',', $allowListRaw)));
+
+        if ($user && in_array((string) $user->email, $allowList, true)) {
+            return $desired > 0 ? min($desired, $superCap) : $superCap;
+        }
+        return $desired > 0 ? min($desired, $defaultCap) : $defaultCap;
+    }
+
+
 }
