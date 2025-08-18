@@ -81,6 +81,178 @@ class PromptBuilder
      * - 0..1 assistant_context (facoltativo, breve e ripulito)
      * - 1 user (testo utente + eventuale SORGENTE + eventuale forcing di formato)
      */
+    // public function buildFinalPayload(
+    //     Plan   $plan,
+    //     string $userProfileJson,
+    //     string $projectMemoryJson,
+    //     string $sourceText = '',
+    //     string $memoryHintsText = ''
+    // ): array {
+    //     // ---- 1) Merge preferenze (REQUIREMENTS > USER_PROFILE > MEMORY > Hints) ----
+    //     $userProfile = $this->decodeJson($userProfileJson);
+    //     $projectMem  = $this->decodeJson($projectMemoryJson);
+    //     $memPrefs    = is_array($projectMem) ? ($projectMem['prefs'] ?? []) : [];
+
+    //     $lang = $this->pickFirstNonEmpty([
+    //         $plan->language,
+    //         $userProfile['language'] ?? null,
+    //         'it',
+    //     ]);
+
+    //     $style = $this->uniqueFlat([
+    //         $plan->style ?? [],
+    //         $userProfile['tone'] ?? [],
+    //         $memPrefs['style'] ?? [],
+    //     ]);
+    //     // hints testuali (se li passi già aggregati)
+    //     $hintsParsed = $this->parseHintsList($memoryHintsText);
+    //     if (!empty($hintsParsed['style'])) {
+    //         $style = array_values(array_unique(array_merge($style, $hintsParsed['style'])));
+    //     }
+    //     // pulizia stile (evita frasi lunghe/rumorose tipo "Passi rapidi...")
+    //     $style = $this->sanitizeStyleTokens($style);
+
+    //     // Evita: forza sempre "diff"; e scoraggia formati strutturati non richiesti
+    //     $avoid = $this->uniqueFlat([
+    //         $plan->avoid ?? [],
+    //         $userProfile['avoid'] ?? [],
+    //         $memPrefs['avoid'] ?? [],
+    //         $hintsParsed['avoid'] ?? [],
+    //     ]);
+    //     $avoidLower = array_map('mb_strtolower', $avoid);
+    //     if (!in_array('diff', $avoidLower, true)) {
+    //         $avoid[] = 'diff';
+    //     }
+
+    //     $length = $this->pickFirstNonEmpty([
+    //         $plan->length,
+    //         $projectMem['length'] ?? null,
+    //         'short',
+    //     ]);
+
+    //     // Modalità "codice": quando il planner richiede codice, imponiamo regole più rigide
+    //     $strictCodeMode = is_string($plan->format) && mb_stripos($plan->format, 'code') !== false;
+
+    //     // Rileva se L'ULTIMO messaggio chiede esplicitamente JSON/YAML/CSV
+    //     $finalUser = (string)$plan->final_user;
+    //     $explicitJson = $this->explicitJsonRequested($finalUser);
+    //     $explicitYaml = $this->explicitYamlRequested($finalUser);
+    //     $explicitCsv  = $this->explicitCsvRequested($finalUser);
+
+    //     // Regole formato/codice
+    //     $codeRules = $strictCodeMode
+    //         ? 'per NUOVO codice: inizia SUBITO con un unico blocco racchiuso tra tre apici (```), indicando il linguaggio se evidente (es. ```python); termina con ```; nessun diff (+/-), nessuna prosa prima o dopo salvo esplicita richiesta.'
+    //         : 'se includi codice, racchiudilo sempre tra tre apici (```), indica il linguaggio se evidente; non usare diff (+/-).';
+
+    //     // target stack (solo come riferimento per PHP/Laravel)
+    //     $phpVersion     = '8.3.21';
+    //     $laravelVersion = '12.x';
+
+    //     // politiche
+    //     $askIfMissing = true;
+    //     $neverInvent  = true;
+
+    //     // ---- 2) System compatta (con regole di precedenza chiare) ----
+    //     $styleLine = $this->styleLine($style);
+    //     $avoidLine = $this->avoidLine($avoid);
+    //     $lenLine   = $this->lengthLine($length);
+
+    //     $precedence = "Regole di precedenza:\n"
+    //         . "1) Obbedisci alla richiesta PIÙ RECENTE dell’utente (questo messaggio) anche se contraddice contesto o preferenze storiche.\n"
+    //         . "2) Se l’utente specifica un FORMATO (es. JSON/YAML/prosa/codice), quel formato ha priorità assoluta.\n"
+    //         . "3) Se l’utente NON specifica un formato, rispondi in prosa naturale; NON usare JSON/YAML/CSV salvo richiesta esplicita.\n"
+    //         . "4) Non cambiare il formato richiesto e non aggiungere testo extra attorno a output strutturati.";
+
+    //     $system = trim(
+    //         "Sei un assistente che risponde in {$lang}.\n\n"
+    //         . $precedence . "\n\n"
+    //         . "Regole di stile:\n"
+    //         . "- Tono: {$styleLine}\n"
+    //         . "- Formato: {$codeRules}\n"
+    //         . "- Lunghezza: {$lenLine}\n\n"
+    //         . "Politiche:\n"
+    //         . ($askIfMissing ? "- Se manca il contesto recente, chiedi chiarimenti brevi.\n" : "")
+    //         . ($neverInvent  ? "- Non inventare mai fatti.\n" : "")
+    //         . "Quando fornisci codice PHP/Laravel, target: PHP {$phpVersion}, Laravel {$laravelVersion}.\n"
+    //         . ($avoidLine ? "\nEvita: {$avoidLine}\n" : "")
+    //     );
+
+    //     // ---- 3) Assistant context (brevissimo e ripulito) ----
+    //     $contextSnippets = [];
+    //     if (trim((string)$plan->context_summary) !== '') {
+    //         $contextSnippets[] = trim((string)$plan->context_summary);
+    //     } elseif ($plan->include_full_history && !empty($plan->history)) {
+    //         $contextSnippets[] = $this->renderHistoryPlain($plan->history, 200, 1200);
+    //     } elseif (trim((string)($plan->compressed_context ?? '')) !== '') {
+    //         $contextSnippets[] = trim((string)$plan->compressed_context);
+    //     }
+        
+    //     // if ($memoryHintsText !== '') {
+    //     //     $briefHints = $this->takeNonEmptyLines($memoryHintsText, 3);
+    //     //     if ($briefHints !== '') {
+    //     //         $contextSnippets[] = "Hints: " . $briefHints;
+    //     //     }
+    //     // }
+
+    //     // Se il compressor ha deciso di sospendere il contesto, non passare alcun assistant_context
+    //     if (!empty($plan->suspend_context)) {
+    //         $contextSnippets = [];
+    //     }
+    //     // filtra rumore/metainstruzioni e rimuovi richieste di formato che CONTRASTANO con l'ultimo messaggio
+    //     $contextSnippets = $this->filterContextSnippets($contextSnippets, $explicitJson, $explicitYaml, $explicitCsv);
+
+    //     $assistantContext = null;
+    //     if (!empty($contextSnippets)) {
+    //         $assistantContext = "Contesto recente utile:\n- " . implode("\n- ", array_map('trim', $contextSnippets));
+    //     }
+
+    //     // ---- 4) User message (+ eventuale SORGENTE + forcing formato se richiesto ORA) ----
+    //     $userContent = $finalUser;
+
+    //     if ($explicitJson) {
+    //         $userContent = "Rispondi ESCLUSIVAMENTE con JSON valido UTF-8, senza testo extra prima/dopo, senza commenti. "
+    //                      . "Se non hai dati, restituisci un JSON vuoto coerente con la richiesta.\n\n"
+    //                      . $userContent;
+    //     } elseif ($explicitYaml) {
+    //         $userContent = "Rispondi ESCLUSIVAMENTE in YAML valido, senza testo extra prima/dopo, senza commenti.\n\n"
+    //                      . $userContent;
+    //     } elseif ($explicitCsv) {
+    //         $userContent = "Rispondi ESCLUSIVAMENTE con un CSV valido (prima riga intestazioni), senza testo extra prima/dopo.\n\n"
+    //                      . $userContent;
+    //     } elseif ($strictCodeMode) {
+    //         $userContent = "Restituisci il codice richiesto in un UNICO blocco markdown tra tre apici (```), "
+    //                      . "con l'etichetta del linguaggio se evidente; nessun diff, nessuna prosa extra.\n\n"
+    //                      . $userContent;
+    //     } else {
+    //         // Nessun formato imposto: rafforza la prosa naturale
+    //         $userContent = "Rispondi in prosa naturale (niente JSON/YAML/CSV se non richiesto esplicitamente).\n\n"
+    //                      . $userContent;
+    //     }
+
+    //     if ($sourceText !== '') {
+    //         $userContent .= "\n\n---\nSORGENTE:\n" . $sourceText;
+    //     }
+
+    //     // ---- 5) Messaggi finali ----
+    //     $messages = [
+    //         ['role' => 'system', 'content' => $system],
+    //     ];
+    //     if ($assistantContext) {
+    //         $messages[] = ['role' => 'assistant', 'name' => 'assistant_context', 'content' => $assistantContext];
+    //     }
+    //     $messages[] = ['role' => 'user', 'content' => $userContent];
+
+    //     // ---- 6) Stringa payload/debug (retrocompat) ----
+    //     $payloadStr = json_encode($messages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    //     return [
+    //         'messages' => $messages,
+    //         'payload'  => $payloadStr,
+    //         'debug'    => $payloadStr,
+    //         'needs_source_but_missing' => false,
+    //     ];
+    // }
+
     public function buildFinalPayload(
         Plan   $plan,
         string $userProfileJson,
@@ -88,10 +260,17 @@ class PromptBuilder
         string $sourceText = '',
         string $memoryHintsText = ''
     ): array {
-        // ---- 1) Merge preferenze (REQUIREMENTS > USER_PROFILE > MEMORY > Hints) ----
+        // ---- 1) Merge preferenze (REQUIREMENTS > USER_PROFILE > MEMORY) ----
         $userProfile = $this->decodeJson($userProfileJson);
-        $projectMem  = $this->decodeJson($projectMemoryJson);
-        $memPrefs    = is_array($projectMem) ? ($projectMem['prefs'] ?? []) : [];
+
+        // IGNORA completamente la project memory se contiene rumore operativo
+        $projectMemRaw = $projectMemoryJson ?: '{}';
+        if ($this->looksOpsNoise($projectMemRaw)) {
+            $projectMem = [];
+        } else {
+            $projectMem = $this->decodeJson($projectMemRaw);
+        }
+        $memPrefs = is_array($projectMem) ? ($projectMem['prefs'] ?? []) : [];
 
         $lang = $this->pickFirstNonEmpty([
             $plan->language,
@@ -104,20 +283,14 @@ class PromptBuilder
             $userProfile['tone'] ?? [],
             $memPrefs['style'] ?? [],
         ]);
-        // hints testuali (se li passi già aggregati)
-        $hintsParsed = $this->parseHintsList($memoryHintsText);
-        if (!empty($hintsParsed['style'])) {
-            $style = array_values(array_unique(array_merge($style, $hintsParsed['style'])));
-        }
-        // pulizia stile (evita frasi lunghe/rumorose tipo "Passi rapidi...")
+        // pulizia stile (no frasi lunghe)
         $style = $this->sanitizeStyleTokens($style);
 
-        // Evita: forza sempre "diff"; e scoraggia formati strutturati non richiesti
+        // Evita diff sempre
         $avoid = $this->uniqueFlat([
             $plan->avoid ?? [],
             $userProfile['avoid'] ?? [],
             $memPrefs['avoid'] ?? [],
-            $hintsParsed['avoid'] ?? [],
         ]);
         $avoidLower = array_map('mb_strtolower', $avoid);
         if (!in_array('diff', $avoidLower, true)) {
@@ -126,42 +299,26 @@ class PromptBuilder
 
         $length = $this->pickFirstNonEmpty([
             $plan->length,
-            $projectMem['length'] ?? null,
+            is_array($projectMem) ? ($projectMem['length'] ?? null) : null,
             'short',
         ]);
 
-        // Modalità "codice": quando il planner richiede codice, imponiamo regole più rigide
         $strictCodeMode = is_string($plan->format) && mb_stripos($plan->format, 'code') !== false;
 
-        // Rileva se L'ULTIMO messaggio chiede esplicitamente JSON/YAML/CSV
-        $finalUser = (string)$plan->final_user;
-        $explicitJson = $this->explicitJsonRequested($finalUser);
-        $explicitYaml = $this->explicitYamlRequested($finalUser);
-        $explicitCsv  = $this->explicitCsvRequested($finalUser);
-
-        // Regole formato/codice
-        $codeRules = $strictCodeMode
-            ? 'per NUOVO codice: inizia SUBITO con un unico blocco racchiuso tra tre apici (```), indicando il linguaggio se evidente (es. ```python); termina con ```; nessun diff (+/-), nessuna prosa prima o dopo salvo esplicita richiesta.'
-            : 'se includi codice, racchiudilo sempre tra tre apici (```), indica il linguaggio se evidente; non usare diff (+/-).';
-
-        // target stack (solo come riferimento per PHP/Laravel)
-        $phpVersion     = '8.3.21';
-        $laravelVersion = '12.x';
-
-        // politiche
-        $askIfMissing = true;
-        $neverInvent  = true;
-
-        // ---- 2) System compatta (con regole di precedenza chiare) ----
+        // ---- 2) System minimale ma rigido ----
         $styleLine = $this->styleLine($style);
         $avoidLine = $this->avoidLine($avoid);
         $lenLine   = $this->lengthLine($length);
 
         $precedence = "Regole di precedenza:\n"
-            . "1) Obbedisci alla richiesta PIÙ RECENTE dell’utente (questo messaggio) anche se contraddice contesto o preferenze storiche.\n"
-            . "2) Se l’utente specifica un FORMATO (es. JSON/YAML/prosa/codice), quel formato ha priorità assoluta.\n"
-            . "3) Se l’utente NON specifica un formato, rispondi in prosa naturale; NON usare JSON/YAML/CSV salvo richiesta esplicita.\n"
-            . "4) Non cambiare il formato richiesto e non aggiungere testo extra attorno a output strutturati.";
+            . "1) Obbedisci alla richiesta PIÙ RECENTE dell’utente.\n"
+            . "2) Se l’utente specifica un FORMATO (JSON/YAML/CSV/codice), usa SOLO quel formato.\n"
+            . "3) Se NON specifica un formato, rispondi in prosa naturale.\n"
+            . "4) Non aggiungere testo extra attorno a output strutturati.";
+
+        $codeRules = $strictCodeMode
+            ? "Per NUOVO codice: restituisci un SOLO blocco markdown tra tre apici (```linguaggio …```), senza diff né prosa."
+            : "Se includi codice, racchiudilo sempre tra tre apici (```), indica il linguaggio se evidente; non usare diff (+/-).";
 
         $system = trim(
             "Sei un assistente che risponde in {$lang}.\n\n"
@@ -171,65 +328,38 @@ class PromptBuilder
             . "- Formato: {$codeRules}\n"
             . "- Lunghezza: {$lenLine}\n\n"
             . "Politiche:\n"
-            . ($askIfMissing ? "- Se manca il contesto recente, chiedi chiarimenti brevi.\n" : "")
-            . ($neverInvent  ? "- Non inventare mai fatti.\n" : "")
-            . "Quando fornisci codice PHP/Laravel, target: PHP {$phpVersion}, Laravel {$laravelVersion}.\n"
+            . "- Se manca il contesto recente, chiedi chiarimenti brevi.\n"
+            . "- Non inventare mai fatti.\n"
+            . "Quando fornisci codice PHP/Laravel, target: PHP 8.3.21, Laravel 12.x.\n"
             . ($avoidLine ? "\nEvita: {$avoidLine}\n" : "")
         );
 
-        // ---- 3) Assistant context (brevissimo e ripulito) ----
-        $contextSnippets = [];
-        if (trim((string)$plan->context_summary) !== '') {
-            $contextSnippets[] = trim((string)$plan->context_summary);
-        } elseif ($plan->include_full_history && !empty($plan->history)) {
-            $contextSnippets[] = $this->renderHistoryPlain($plan->history, 200, 1200);
-        } elseif (trim((string)($plan->compressed_context ?? '')) !== '') {
-            $contextSnippets[] = trim((string)$plan->compressed_context);
-        }
-        
-        // if ($memoryHintsText !== '') {
-        //     $briefHints = $this->takeNonEmptyLines($memoryHintsText, 3);
-        //     if ($briefHints !== '') {
-        //         $contextSnippets[] = "Hints: " . $briefHints;
-        //     }
-        // }
-
-        // Se il compressor ha deciso di sospendere il contesto, non passare alcun assistant_context
-        if (!empty($plan->suspend_context)) {
-            $contextSnippets = [];
-        }
-        // filtra rumore/metainstruzioni e rimuovi richieste di formato che CONTRASTANO con l'ultimo messaggio
-        $contextSnippets = $this->filterContextSnippets($contextSnippets, $explicitJson, $explicitYaml, $explicitCsv);
-
+        // ---- 3) Assistant context: SOLO se esplicitamente utile e ripulito ----
         $assistantContext = null;
-        if (!empty($contextSnippets)) {
-            $assistantContext = "Contesto recente utile:\n- " . implode("\n- ", array_map('trim', $contextSnippets));
+        $snippets = [];
+
+        if ($plan->include_full_history && !empty($plan->history)) {
+            $snippets[] = $this->renderHistoryPlain($plan->history, 200, 800);
+        }
+        if (trim((string)$plan->context_summary) !== '') {
+            $snippets[] = trim((string)$plan->context_summary);
+        }
+        if (trim((string)($plan->compressed_context ?? '')) !== '') {
+            $snippets[] = trim((string)$plan->compressed_context);
         }
 
-        // ---- 4) User message (+ eventuale SORGENTE + forcing formato se richiesto ORA) ----
+        // Filtra rumore (runbook/checklist/504/INJECTED/SOURCES…) e tieni al massimo 1 voce
+        $snippets = $this->filterContextSnippets($snippets);
+        if (!empty($snippets)) {
+            $assistantContext = "Contesto utile:\n- " . $snippets[0];
+        }
+
+        // ---- 4) User message: SOLO l’input dell’utente; niente prefissi verbosi ----
+        $finalUser = (string)$plan->final_user;
         $userContent = $finalUser;
 
-        if ($explicitJson) {
-            $userContent = "Rispondi ESCLUSIVAMENTE con JSON valido UTF-8, senza testo extra prima/dopo, senza commenti. "
-                         . "Se non hai dati, restituisci un JSON vuoto coerente con la richiesta.\n\n"
-                         . $userContent;
-        } elseif ($explicitYaml) {
-            $userContent = "Rispondi ESCLUSIVAMENTE in YAML valido, senza testo extra prima/dopo, senza commenti.\n\n"
-                         . $userContent;
-        } elseif ($explicitCsv) {
-            $userContent = "Rispondi ESCLUSIVAMENTE con un CSV valido (prima riga intestazioni), senza testo extra prima/dopo.\n\n"
-                         . $userContent;
-        } elseif ($strictCodeMode) {
-            $userContent = "Restituisci il codice richiesto in un UNICO blocco markdown tra tre apici (```), "
-                         . "con l'etichetta del linguaggio se evidente; nessun diff, nessuna prosa extra.\n\n"
-                         . $userContent;
-        } else {
-            // Nessun formato imposto: rafforza la prosa naturale
-            $userContent = "Rispondi in prosa naturale (niente JSON/YAML/CSV se non richiesto esplicitamente).\n\n"
-                         . $userContent;
-        }
-
-        if ($sourceText !== '') {
+        // Aggiungi la SORGENTE solo se davvero richiesta dal plan
+        if ($plan->needs_verbatim_source && $sourceText !== '') {
             $userContent .= "\n\n---\nSORGENTE:\n" . $sourceText;
         }
 
@@ -242,7 +372,7 @@ class PromptBuilder
         }
         $messages[] = ['role' => 'user', 'content' => $userContent];
 
-        // ---- 6) Stringa payload/debug (retrocompat) ----
+        // ---- 6) Payload/debug ----
         $payloadStr = json_encode($messages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         return [
@@ -252,6 +382,7 @@ class PromptBuilder
             'needs_source_but_missing' => false,
         ];
     }
+
 
     // ---------- helpers ----------
     private function decodeJson(?string $json): array
@@ -458,26 +589,35 @@ class PromptBuilder
         return array_values(array_unique($normalized));
     }
 
-    private function filterContextSnippets(array $snippets, bool $wantJson, bool $wantYaml, bool $wantCsv): array
-    {
+    private function looksOpsNoise(string $s): bool {
+        $t = mb_strtolower($s);
+        $kw = [
+            'runbook','checklist','incident','504','gateway','reverse proxy','proxy','cloudflare','alb','nginx',
+            'content-type','application/json','text/html','redirect','30x','401','403',
+            'jwks','kid','firma','signature','rotazione chiavi','rotate',
+            'parsing html','parse json','non-json','timeout','p95','p99',
+            '[injected]','[sources]'
+        ];
+        foreach ($kw as $k) {
+            if (str_contains($t, $k)) return true;
+        }
+        return false;
+    }
+
+    private function filterContextSnippets(array $snippets): array {
         $out = [];
         foreach ($snippets as $s) {
-            $sTrim = trim($s);
-            if ($sTrim === '') continue;
-
-            // rimuovi sezioni palesemente meta/organizzative
-            if (preg_match('/\b(Policy|Decisioni|Obiettivi|Vincoli|Attività Aperte|Assunzioni|Checklist|Passi rapidi)\b/i', $sTrim)) {
+            $st = trim((string)$s);
+            if ($st === '') continue;
+            if ($this->looksOpsNoise($st)) continue;
+            // niente meta come Policy/Decisioni/Obiettivi/Vincoli
+            if (preg_match('/\b(policy|decisioni|obiettivi|vincoli|prossimi passi|assunzioni|checklist|runbook)\b/i', $st)) {
                 continue;
             }
-
-            // se l'ultimo messaggio NON chiede JSON/YAML/CSV, non spingere verso quei formati
-            if (!$wantJson && preg_match('/\bjson\b/i', $sTrim)) continue;
-            if (!$wantYaml && preg_match('/\byaml\b/i', $sTrim)) continue;
-            if (!$wantCsv  && preg_match('/\bcsv\b/i',  $sTrim)) continue;
-
-            $out[] = $sTrim;
+            $out[] = $st;
+            if (count($out) >= 1) break; // massimo 1
         }
-        // tieni al massimo 2 elementi per non “sovrascrivere” il turno
-        return array_slice($out, 0, 2);
+        return $out;
     }
+
 }
