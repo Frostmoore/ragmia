@@ -283,6 +283,7 @@ export default function registerChatStore(Alpine) {
             model: selectedModel,
             compress_model: selectedCompressor,
             raw_user: this.useCompressor ? '0' : '1',
+            max_tokens: '4000',
           })
         });
 
