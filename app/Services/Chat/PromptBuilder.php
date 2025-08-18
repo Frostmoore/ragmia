@@ -186,11 +186,17 @@ class PromptBuilder
         } elseif (trim((string)($plan->compressed_context ?? '')) !== '') {
             $contextSnippets[] = trim((string)$plan->compressed_context);
         }
-        if ($memoryHintsText !== '') {
-            $briefHints = $this->takeNonEmptyLines($memoryHintsText, 3);
-            if ($briefHints !== '') {
-                $contextSnippets[] = "Hints: " . $briefHints;
-            }
+        
+        // if ($memoryHintsText !== '') {
+        //     $briefHints = $this->takeNonEmptyLines($memoryHintsText, 3);
+        //     if ($briefHints !== '') {
+        //         $contextSnippets[] = "Hints: " . $briefHints;
+        //     }
+        // }
+
+        // Se il compressor ha deciso di sospendere il contesto, non passare alcun assistant_context
+        if (!empty($plan->suspend_context)) {
+            $contextSnippets = [];
         }
         // filtra rumore/metainstruzioni e rimuovi richieste di formato che CONTRASTANO con l'ultimo messaggio
         $contextSnippets = $this->filterContextSnippets($contextSnippets, $explicitJson, $explicitYaml, $explicitCsv);

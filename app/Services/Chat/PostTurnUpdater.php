@@ -14,20 +14,22 @@ class PostTurnUpdater {
 
         // 1) PROJECT MEMORY (come già facevi): prompt snello
         $projPrompt = <<<EOT
-Sei un gestore di memorie di progetto.
+        Sei un gestore di memorie di progetto.
 
-Aggiorna la memoria SOLO con fatti utili e persistenti (tema, scelte stilistiche, vincoli di formato).
-Ignora testi creativi, saluti, cose effimere.
+        Aggiorna la memoria SOLO con fatti utili e persistenti (tema, scelte stilistiche, vincoli di formato).
+        Ignora testi creativi, saluti, cose effimere.
 
-Output SOLO JSON: {"memory":"..."} (stringa JSON valida o vuota).
+        Ignora checklist operative, runbook, passi rapidi, diagnostica di rete/HTTP: non sono memorie di progetto.
 
-MEMORIA_CORRENTE:
-{$projectMemoryJson}
+        Output SOLO JSON: {"memory":"..."} (stringa JSON valida o vuota).
 
-SCAMBIO:
-USER: {$prompt}
-ASSISTANT: {$answer}
-EOT;
+        MEMORIA_CORRENTE:
+        {$projectMemoryJson}
+
+        SCAMBIO:
+        USER: {$prompt}
+        ASSISTANT: {$answer}
+        EOT;
 
         try {
             $res = $this->llm->call($compressModel, [

@@ -16,20 +16,23 @@ class PreTurnProfileUpdater {
 
         // prompt minimalista (pochi token)
         $p = <<<EOT
-Sei un estrattore di preferenze utente PERSISTENTI dal SOLO messaggio sottostante.
-Se non emergono preferenze durevoli, restituisci {}.
+        Sei un estrattore di preferenze utente PERSISTENTI dal SOLO messaggio sottostante.
+        Se non emergono preferenze durevoli, restituisci {}.
 
-Preferenze ammesse:
-- language: "it"|"en"|...
-- tone: array (es. ["diretto","ironico"])
-- avoid: array di cose da evitare (es. ["francese"])
-- formats_preferred: array (es. ["prose","code","steps"])
+        Preferenze ammesse:
+        - language: "it"|"en"|...
+        - tone: array (es. ["diretto","ironico"])
+        - avoid: array (es. ["francese"])
+        - formats_preferred: array (es. ["prose","code","steps"])
 
-Output SOLO JSON oggetto (no testo fuori da {}).
+        NON salvare istruzioni operative, checklist, runbook, riferimenti a errori (es. 504/JSON parsing), o richieste una tantum.
 
-MESSAGGIO:
-{$prompt}
-EOT;
+
+        Output SOLO JSON oggetto (no testo fuori da {}).
+
+        MESSAGGIO:
+        {$prompt}
+        EOT;
 
         try {
             $res = $this->llm->call($compressModel, [

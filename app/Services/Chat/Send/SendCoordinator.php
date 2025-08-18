@@ -73,7 +73,7 @@ class SendCoordinator
         if ($r->auto) {
             try {
                 $plan = $this->planner->plan(
-                    $r->compressModel, $userProfileJson, $projectMemoryJson, $historyArr, $r->prompt
+                    $r->compressModel, $userProfileJson, $projectMemoryJson, $historyArr, $r->prompt, $memoryHintsText
                 );
                 $plannerRaw = $plan->raw;
             } catch (\Throwable $e) {
@@ -149,7 +149,7 @@ class SendCoordinator
         // 4) payload base
         $sourceText = $this->builder->determineSourceText($plan, $historyArr);
         $final      = $this->builder->buildFinalPayload(
-            $plan, $userProfileJson, $projectMemoryJson, $sourceText, $memoryHintsText
+            $plan, $userProfileJson, $projectMemoryJson, $sourceText
         );
 
         // 4.b) ===== inietta SEMPRE RAG (GLOBAL+PROJECT+SOURCES) già compresso =====

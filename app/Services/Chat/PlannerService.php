@@ -14,73 +14,76 @@ class PlannerService
         string $userProfileJson,
         string $projectMemoryJson,
         array  $historyArr,
-        string $currentPrompt
+        string $currentPrompt,
+        string $memoryHintsText = ''
     ): Plan {
         $hist = $this->renderHistoryPlain($historyArr, 240, 1200);
 
         // ===================== SYSTEM PROMPT (compressor) =====================
         $sys = <<<SYS
-Sei un compressor/planner conservativo. NON rispondere alla domanda dell’utente.
-Obiettivi:
-- Costruire un riassunto strutturato per il modello finale.
-- Dare priorità assoluta all’ULTIMO messaggio dell’utente.
+        Sei un compressor/planner conservativo. NON rispondere alla domanda dell’utente.
+        Obiettivi:
+        - Preparare per il modello finale SOLO le istruzioni davvero utili.
+        - Dare priorità assoluta all’ULTIMO messaggio dell’utente.
+        - Il contesto (history/memorie/hints) può essere usato, ma va “sospeso” se non pertinente al turno.
 
-Regole:
-1) "final_user": deve essere una COPIA ESATTA di USER_PROMPT (stesso testo; puoi normalizzare solo spazi finali). Niente parafrasi o completamenti.
-2) "format": scegli SOLO tra ["prose","code","json","yaml","csv"] in base a trigger ESPLICITI in USER_PROMPT:
-   - "json","in json","formato json"  -> format="json"
-   - "yaml","in yaml","formato yaml"  -> format="yaml"
-   - "csv","in csv","formato csv"     -> format="csv"
-   - "codice","script","implementa","scrivi codice", presenza di ``` o pattern di codice -> format="code"
-   - Altrimenti -> "prose"
-   Non imporre JSON/YAML/CSV senza trigger. Non forzare "code" se non esplicitamente richiesto.
-3) "context_summary": una sola riga su cosa vuole ORA l’utente, senza consigli o soluzioni.
-4) "compressed_context": al massimo 2 bullet molto brevi e davvero utili alla richiesta corrente; se non servono, stringa vuota.
-   - Vietato includere checklist/policy generiche, “passi rapidi”, elenchi di sicurezza, materiale off-topic.
-5) "style" e "avoid": estrai solo se espliciti in USER_PROMPT; altrimenti [].
-   - Per "style" usa solo token brevi e comuni (es. diretto, colloquiale, professionale, tecnico, sintetico, dettagliato, ironico, sarcastico, formale, informale, amichevole, pragmatico, chiaro, neutro, creativo).
-6) Sorgente:
-   - Se l’utente ha incollato CODICE o chiede di spiegare/analizzare/riscrivere contenuto appena incollato -> "needs_verbatim_source": true e "source_where": "last_user"
-   - Se chiede di modificare/continuare l’ULTIMO OUTPUT dell’assistente (testo/codice) -> "needs_verbatim_source": true e "source_where": "last_assistant"
-   - Altrimenti "needs_verbatim_source": false, "source_where": "none"
-7) Non usare memoria/storia se non sono chiaramente utili: niente “include_full_history”; non generare "compressed_context" se non serve.
-8) Ritorna SOLO lo JSON richiesto. Nessun testo fuori.
+        Regole di output:
+        1) "final_user": COPIA ESATTA del blocco USER_PROMPT (stesso testo; puoi normalizzare spazi a fine riga).
+        2) "format": scegli in ["prose","code","json","yaml","csv"] SOLO se richiesto esplicitamente dall’ultimo messaggio; altrimenti "prose".
+        3) "context_summary": UNA riga neutra su cosa vuole ORA l’utente (niente soluzioni).
+        4) "compressed_context": 0–2 righe massime, solo promemoria strettamente utili (no checklist generiche, no runbook, no “passi rapidi”).
+        5) "style"/"avoid": estrai SOLO se espliciti nell’ultimo messaggio (token brevi).
+        6) "needs_verbatim_source"/"source_where": vedi sotto Sorgente.
+        7) "suspend_context": true se il turno è una domanda secca/atomica o il contesto è fuorviante → in quel caso NON passare storia/memorie.
+        8) Ritorna SOLO JSON valido. Nessun testo fuori.
 
-Valori ammessi:
-- format: "prose" | "code" | "json" | "yaml" | "csv"
-- source_where: "none" | "last_user" | "last_assistant"
-SYS;
+        Sorgente:
+        - Se l’utente ha incollato CODICE o chiede analisi/riscrittura del contenuto incollato → needs_verbatim_source=true, source_where="last_user".
+        - Se chiede di modificare/continuare l’ULTIMO OUTPUT dell’assistente → needs_verbatim_source=true, source_where="last_assistant".
+        - Altrimenti needs_verbatim_source=false, source_where="none".
+
+        Valori ammessi:
+        - format: "prose" | "code" | "json" | "yaml" | "csv"
+        - source_where: "none" | "last_user" | "last_assistant"
+        - suspend_context: boolean
+        SYS;
+
 
         // ===================== USER PROMPT (compressor) =====================
+        $hintsSlim = $this->takeNonEmptyLines($memoryHintsText, 12);
         $usr = <<<USR
-[USER_PROFILE]
-{$this->normalizeJson($userProfileJson)}
+        [USER_PROFILE]
+        {$this->normalizeJson($userProfileJson)}
 
-[PROJECT_MEMORY]
-{$this->normalizeJson($projectMemoryJson)}
+        [PROJECT_MEMORY]
+        {$this->normalizeJson($projectMemoryJson)}
 
-[RECENT_HISTORY]
-{$hist}
+        [RECENT_HISTORY]
+        {$hist}
 
-[USER_PROMPT]
-{$currentPrompt}
+        [HINTS_RAW]
+        {$hintsSlim}
 
-JSON atteso esatto:
-{
-  "final_user": "COPIA_ESATTA_DI_USER_PROMPT",
-  "subject": "",
-  "style": [],
-  "avoid": [],
-  "language": "",
-  "length": "",
-  "format": "prose",
-  "include_full_history": false,
-  "compressed_context": "",
-  "context_summary": "",
-  "needs_verbatim_source": false,
-  "source_where": "none"
-}
-USR;
+        [USER_PROMPT]
+        {$currentPrompt}
+
+        JSON atteso esatto:
+        {
+        "final_user": "COPIA_ESATTA_DI_USER_PROMPT",
+        "subject": "",
+        "style": [],
+        "avoid": [],
+        "language": "",
+        "length": "",
+        "format": "prose",
+        "include_full_history": false,
+        "compressed_context": "",
+        "context_summary": "",
+        "needs_verbatim_source": false,
+        "source_where": "none",
+        "suspend_context": false
+        }
+        USR;
 
         // Chiamata al modello compressor
         $resp = $this->llm->call($compressModel, [
@@ -97,6 +100,31 @@ USR;
         $plan->raw = $rawText;
 
         // ===================== GUARD-RAIL SERVER-SIDE =====================
+
+        // Pre-0) Default e Fallback:
+        // Default boolean robusti
+        if (!isset($plan->suspend_context)) $plan->suspend_context = false;
+
+        // Lingua di fallback
+        if ($plan->language === '') {
+            $plan->language = $this->guessLanguage($currentPrompt) ?: 'it';
+        }
+
+        // Pass-through duro: final_user = input
+        if (trim((string)$plan->final_user) === '' || $this->notEqualLoose($plan->final_user, $currentPrompt)) {
+            $plan->final_user = $currentPrompt;
+        }
+
+        // Format sanitization (resta come nel tuo codice)
+
+        // Domande atomiche: sospendi contesto
+        if ($this->looksAtomicQuestion($currentPrompt)) {
+            $plan->suspend_context   = true;
+            $plan->include_full_history = false;
+            $plan->compressed_context   = '';
+            $plan->context_summary      = $plan->context_summary ?: 'Domanda atomica di conoscenza generale.';
+        }
+
         // 0) Normalizza lingua
         if ($plan->language === '') {
             $plan->language = $this->guessLanguage($currentPrompt) ?: 'it';
@@ -216,7 +244,7 @@ USR;
     }
 
     private function looksYamlRequested(string $s): bool {
-        return (bool)pregmatch('/\b(yaml|in\s+yaml|formato\s+yaml)\b/i', $s);
+        return (bool)preg_match('/\b(yaml|in\s+yaml|formato\s+yaml)\b/i', $s);
     }
 
     private function looksCsvRequested(string $s): bool {
@@ -312,4 +340,11 @@ USR;
     private function guessLanguage(string $s): ?string {
         return preg_match('/[àèéìòóù]/i', $s) ? 'it' : null;
     }
+
+    private function takeNonEmptyLines(string $text, int $maxLines = 12): string {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R+/', (string)$text)), fn($l) => $l !== ''));
+        if (count($lines) > $maxLines) $lines = array_slice($lines, 0, $maxLines);
+        return implode("\n", $lines);
+    }
+
 }
